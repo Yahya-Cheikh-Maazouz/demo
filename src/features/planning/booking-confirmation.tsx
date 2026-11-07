@@ -7,17 +7,19 @@ import { Alert } from "@/components/ui/alert";
 import { ButtonLink } from "@/components/ui/button";
 
 type BookingConfirmationProps = {
-  /** The lesson was created "en attente de paiement". */
+  /** "à Sophie Laurent pour le vendredi 6 novembre à 15:00". */
+  summary: string;
+  /** The credit does not cover it: once confirmed, it will wait for a payment. */
   pendingPayment: boolean;
   /** Planning URL without the confirmation parameters, used when the banner is dismissed. */
   dismissHref: string;
 };
 
 /**
- * Banner shown after a booking (redirect to /eleve/planning?reservee=1). It takes the focus on
- * arrival so screen readers hear the confirmation, and can be dismissed (cleans the URL).
+ * Banner shown after a lesson request (redirect to /eleve/planning?demande=<id>). It takes the
+ * focus on arrival so screen readers hear the confirmation, and can be dismissed (cleans the URL).
  */
-export function BookingConfirmation({ pendingPayment, dismissHref }: BookingConfirmationProps) {
+export function BookingConfirmation({ summary, pendingPayment, dismissHref }: BookingConfirmationProps) {
   const router = useRouter();
   const ref = useRef<HTMLDivElement>(null);
 
@@ -44,7 +46,7 @@ export function BookingConfirmation({ pendingPayment, dismissHref }: BookingConf
           className="animate-[dialog-in_200ms_ease-out]"
           title={
             <span className="flex items-start justify-between gap-2">
-              <span className="pt-0.5">Demande envoyée : la leçon sera confirmée après paiement</span>
+              <span className="pt-0.5">Demande envoyée {summary}</span>
               {dismiss}
             </span>
           }
@@ -58,8 +60,8 @@ export function BookingConfirmation({ pendingPayment, dismissHref }: BookingConf
             </ButtonLink>
           }
         >
-          Votre solde ne couvre pas cette leçon. Elle apparaît dans vos leçons à venir « en attente de paiement » :
-          l&apos;auto-école la confirmera dès que vos heures seront réglées.
+          Votre crédit ne couvre pas cette leçon : une fois confirmée par votre moniteur, elle attendra le
+          règlement de vos heures.
         </Alert>
       ) : (
         <Alert
@@ -67,12 +69,13 @@ export function BookingConfirmation({ pendingPayment, dismissHref }: BookingConf
           className="animate-[dialog-in_200ms_ease-out]"
           title={
             <span className="flex items-start justify-between gap-2">
-              <span className="pt-0.5">Leçon réservée, c&apos;est confirmé</span>
+              <span className="pt-0.5">Demande envoyée {summary}</span>
               {dismiss}
             </span>
           }
         >
-          Elle apparaît dans vos leçons à venir, avec l&apos;adresse du rendez-vous.
+          Elle apparaît « À confirmer » dans vos rendez-vous. Vous serez prévenu(e) dès que votre moniteur
+          l&apos;aura confirmée.
         </Alert>
       )}
     </div>

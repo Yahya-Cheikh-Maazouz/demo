@@ -67,7 +67,8 @@ export type Vehicle = {
 
 export type LessonType = "conduite" | "code" | "examen_blanc" | "examen";
 
-export type LessonStatus = "confirme" | "effectue" | "annule" | "attente_paiement";
+/** "a_confirmer": requested by the student, waiting for the instructor's confirmation. */
+export type LessonStatus = "a_confirmer" | "confirme" | "effectue" | "annule" | "attente_paiement";
 
 export type Lesson = {
   id: string;
@@ -86,6 +87,8 @@ export type Lesson = {
   chargedHours?: number;
   /** Cancelled because the student did not show up. */
   noShow?: boolean;
+  /** When the student said "Je suis prêt(e)" for this lesson. */
+  studentReadyAt?: string;
 };
 
 /** Instructor leave: no lesson can be booked during it. */
@@ -179,7 +182,9 @@ export type Slot = {
 export type BookingRules = {
   minNoticeHours: number;
   freeCancellationHours: number;
+  /** Weekly quota of a student's requests and lessons (set by the gérant). */
   maxLessonsPerWeek: number;
+  maxHoursPerWeek: number;
   lateCancellationCharged: boolean;
   restrictedToReferent: boolean;
 };
@@ -538,4 +543,387 @@ export type ImportSession = {
   quotaRemaining: number;
   /** Filled from "importe" on. */
   report: ImportReport | null;
+};
+
+// ---------------------------------------------------------------------------
+// Student booking: week grid of the referent instructor, lessons are requests to confirm
+
+/**
+ * "libre": can be requested; "pris": the instructor (or the student, or every vehicle) is busy,
+ * or the instructor is on leave; "passe": too late (minimum notice); "ferme": outside opening hours.
+ */
+export type WeekSlotState = "libre" | "pris" | "passe" | "ferme";
+
+/** One hour of the instructor's agenda. */
+export type WeekSlot = { start: string; state: WeekSlotState };
+
+export type BookingWeek = {
+  now: string;
+  /** Monday, "YYYY-MM-DD" (Paris). */
+  weekStart: string;
+  instructor: Instructor;
+  /** Start hours of the rows, "HH:MM". */
+  hours: string[];
+  /** Monday to Saturday; `slots` follows `hours`. */
+  days: Array<{ date: string; slots: WeekSlot[] }>;
+  /** Requests and lessons of the student that week, for the quota. */
+  booked: { lessons: number; hours: number };
+  rules: BookingRules;
+  /** Bookable range: from this week to `lastWeekStart`. */
+  firstWeekStart: string;
+  lastWeekStart: string;
+};
+
+export type LessonRequestInput = {
+  type: Extract<LessonType, "conduite" | "code">;
+  start: string;
+  durationHours: number;
+};
+
+// ---------------------------------------------------------------------------
+// Messaging (student ↔ instructor or auto-école) and notifications
+
+export type MessageParty = "moniteur" | "ecole";
+
+export type Message = {
+  id: string;
+  direction: "recu" | "envoye";
+  /** Author of a received message, or recipient of a sent one. */
+  correspondent: { kind: MessageParty; name: string };
+  subject: string;
+  body: string;
+  sentAt: string;
+  /** Received messages only: null while unread. */
+  readAt: string | null;
+};
+
+export type Mailbox = {
+  now: string;
+  received: Message[];
+  sent: Message[];
+  recipients: Array<{ kind: MessageParty; name: string }>;
+};
+
+// ---------------------------------------------------------------------------
+// Starting evaluation (questionnaire set by each auto-école) and skills record (livret)
+
+export type EvaluationQuestion = {
+  id: string;
+  label: string;
+  options: Array<{ id: string; label: string }>;
+};
+
+export type EvaluationResult = {
+  submittedAt: string;
+  score: number;
+  total: number;
+  answers: Array<{ questionId: string; chosen: string; correct: string; explanation: string }>;
+};
+
+export type StartingEvaluation = {
+  title: string;
+  intro: string;
+  questions: EvaluationQuestion[];
+  /** Null until the student has answered (one attempt). */
+  result: EvaluationResult | null;
+};
+
+export type CompetenceStatus = "acquis" | "en_progression" | "a_renforcer" | "non_aborde";
+
+/** REMC competence (C1 to C4), filled in by the instructors. */
+export type Competence = {
+  code: "C1" | "C2" | "C3" | "C4";
+  label: string;
+  description: string;
+  /** 0 to 100. */
+  progress: number;
+  status: CompetenceStatus;
+  nextGoal: string;
+};
+
+export type Livret = {
+  /** 0 to 100. */
+  overallProgress: number;
+  headline: string;
+  drivingHours: number;
+  competences: Competence[];
+  /** Latest entry of `feedback`. */
+  instructorNote: { text: string; author: string; updatedAt: string } | null;
+  /** Instructors' comments after lessons ("retours après leçon"), newest first. */
+  feedback: Array<{ text: string; author: string; at: string }>;
+};
+
+// ---------------------------------------------------------------------------
+// Parent space (legal guardian of a minor student)
+
+/** A minor student followed by the signed-in parent. */
+export type GuardianChild = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  /** Computed by the API at request time. */
+  age: number;
+  licence: string;
+  office: string;
+  referentInstructor: Instructor;
+};
+
+/** The parent's own account, with the children linked to it (same auto-école only). */
+export type ParentAccount = {
+  now: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  children: GuardianChild[];
+  /** ISO date of the parent's pending account deletion request, if any. */
+  deletionRequestedAt: string | null;
+};
+
+/** Authorisations given by the legal guardian of a minor (spec: "validations et autorisations"). */
+export type ConsentKey = "photos" | "contact_telephone" | "rgpd" | "communications";
+
+export type Consent = {
+  key: ConsentKey;
+  granted: boolean;
+  /** Last decision; null while nobody has decided (the authorisation is then not given). */
+  decidedAt: string | null;
+  decidedBy: string | null;
+  /** The training cannot go on without it (processing of personal data). */
+  required: boolean;
+};
+
+export type GuardianValidationStatus = "en_attente" | "acceptee" | "refusee";
+
+/** Something the auto-école proposes and the legal guardian accepts or refuses. */
+export type GuardianValidation = {
+  id: string;
+  kind: "changement_formule";
+  title: string;
+  description: string;
+  proposedAt: string;
+  proposedBy: string;
+  status: GuardianValidationStatus;
+  decidedAt: string | null;
+  decidedBy: string | null;
+};
+
+/** Home of the parent space: what is coming, where the child stands, what is waiting for the parent. */
+export type ChildOverview = {
+  now: string;
+  child: GuardianChild;
+  nextLesson: Lesson | null;
+  upcomingCount: number;
+  progress: Pick<Livret, "overallProgress" | "headline" | "drivingHours">;
+  balance: Balance;
+  /** Missing or refused pieces of the file. */
+  documentsToSend: Array<Pick<RequiredDocument, "id" | "label" | "status">>;
+  documentsTotal: number;
+  documentsValidated: number;
+  /** Authorisations nobody has decided yet, and the required ones that were refused. */
+  consentsToGive: Consent[];
+  pendingValidations: GuardianValidation[];
+  nextInstallment: Installment | null;
+};
+
+export type ChildLessons = { now: string; child: GuardianChild; upcoming: Lesson[]; history: Lesson[] };
+
+export type ChildProgress = { now: string; child: GuardianChild; livret: Livret };
+
+export type ChildPayments = {
+  now: string;
+  child: GuardianChild;
+  balance: Balance;
+  installments: Installment[];
+  invoices: Invoice[];
+};
+
+/** Sensitive pieces (identity) come with their status only: no file name nor upload date. */
+export type ChildDocuments = { now: string; child: GuardianChild; documents: RequiredDocument[] };
+
+export type ChildAuthorisations = {
+  now: string;
+  child: GuardianChild;
+  consents: Consent[];
+  /** Pending first, then decided ones, latest first. */
+  validations: GuardianValidation[];
+};
+
+// ---------------------------------------------------------------------------
+// Instructor space (PWA moniteur)
+
+/**
+ * Whether a confirmed lesson can take place, as the instructor sees it: the instructor never sees
+ * the student's balance. "rouge": the lesson waits for a payment, the student goes to the agency.
+ */
+export type LessonLight = "vert" | "rouge";
+
+/** What the instructor knows of a student: what the lesson needs, never the balance. */
+export type InstructorStudent = {
+  id: string;
+  firstName: string;
+  lastName: string;
+  phone: string;
+  /** Full NEPH: display it masked (NephValue). */
+  neph: string | null;
+  licence: string;
+};
+
+/** A lesson of the signed-in instructor (charged hours are not part of it). */
+export type InstructorLesson = Omit<Lesson, "chargedHours"> & {
+  student: InstructorStudent;
+  /** Null unless the lesson is confirmed and still to come or to sign. */
+  light: LessonLight | null;
+  /** Émargement: when the student signed on the instructor's phone. */
+  signedAt: string | null;
+};
+
+export type LeaveReason = "Congés" | "Maladie" | "Formation" | "Autre";
+
+export type InstructorLeave = Leave & {
+  /** Declared from the instructor space: the instructor may delete it until it starts. */
+  declaredByInstructor: boolean;
+};
+
+export type InstructorDay = {
+  now: string;
+  /** Displayed day and today, "YYYY-MM-DD" (Paris). */
+  date: string;
+  today: string;
+  /** Lessons of the day, in time order. */
+  lessons: InstructorLesson[];
+  /** Leaves overlapping the day. */
+  leaves: InstructorLeave[];
+  /** Started lessons of other days still to sign or to mark absent (last 14 days), oldest first. */
+  toClose: InstructorLesson[];
+};
+
+export type InstructorLessonDetail = {
+  now: string;
+  lesson: InstructorLesson;
+  /** Skills record of the student, for driving lessons and mock exams; null otherwise. */
+  livret: Livret | null;
+  /** Signature image (PNG data URL) once the student has signed. */
+  signature: { dataUrl: string; signedAt: string } | null;
+};
+
+/** Start and end are ISO instants. */
+export type LeaveInput = { start: string; end: string; reason: LeaveReason };
+
+/** A lesson that prevents a leave: the agency has to move it first. */
+export type LeaveConflict = { lessonId: string; start: string; end: string; type: LessonType; studentName: string };
+
+/** Code "conflit" lists the lessons in `conflicts`; "invalide" comes with `fieldErrors` (start, end, reason). */
+export type LeaveResult =
+  | { ok: true; data: { leave: InstructorLeave } }
+  | { ok: false; code: string; error: string; fieldErrors?: Record<string, string>; conflicts?: LeaveConflict[] };
+
+/** Lessons given (status "effectue") and still planned, every lesson type included. */
+export type InstructorHours = {
+  now: string;
+  week: {
+    /** Monday, "YYYY-MM-DD" (Paris). */
+    start: string;
+    doneLessons: number;
+    doneHours: number;
+    /** Confirmed lessons from now to Sunday. */
+    plannedLessons: number;
+    plannedHours: number;
+    /** Requests waiting for the instructor, from now to Sunday. */
+    requestedHours: number;
+  };
+  month: {
+    /** First day of the month, "YYYY-MM-DD" (Paris). */
+    start: string;
+    doneLessons: number;
+    doneHours: number;
+    noShows: number;
+  };
+};
+
+// ---------------------------------------------------------------------------
+// Platform back-office (super-admin) and subscription states. The platform only sees usage
+// figures: never a school's business content (students, notes, payments).
+
+/**
+ * Super-admin actions on a school's subscription. The real platform runs most of them itself on
+ * Stripe Billing events (refused payment, end of the 14-day grace period); the mock simulates them.
+ * "reactiver": payment received (impayé, lecture seule, essai) or reactivation (suspendu).
+ */
+export type SchoolStatusAction = "echec_paiement" | "fin_delai_grace" | "suspendre" | "reactiver";
+
+export type PlatformSchool = {
+  slug: string;
+  name: string;
+  /** Address of the school's space, e.g. "https://dupont.<domaine>". */
+  url: string;
+  plan: PlatformPlan;
+  status: SubscriptionStatus;
+  /** Accounts: team (invitations included, deactivated excluded), active students, parents. */
+  users: { total: number; team: number; students: number; parents: number };
+  activeStudents: number;
+  lastActivityAt: string | null;
+  createdAt: string;
+};
+
+export type PlatformOverview = {
+  now: string;
+  schools: PlatformSchool[];
+  /** Monthly revenue of the paying schools ("actif"), and of the unpaid ones (impayé, lecture seule). */
+  mrr: number;
+  unpaidMrr: number;
+  countsByStatus: Record<SubscriptionStatus, number>;
+};
+
+/** Platform journal: who, what, when, on which school. */
+export type PlatformAuditEntry = {
+  id: string;
+  at: string;
+  actor: string;
+  schoolSlug: string;
+  schoolName: string;
+  /** French sentence, e.g. "Statut : Actif → Impayé (échec de paiement)". */
+  summary: string;
+};
+
+export type PlatformSchoolDetail = PlatformSchool & {
+  now: string;
+  siret: string;
+  gerantEmail: string;
+  renewsAt: string;
+  trialEndsAt: string | null;
+  unpaidSince: string | null;
+  /** End of the grace period, after which an unpaid school becomes read-only. */
+  graceEndsAt: string | null;
+  quotas: Quota[];
+  plans: PlatformPlan[];
+  /** Status actions allowed from the current status. */
+  actions: SchoolStatusAction[];
+  journal: PlatformAuditEntry[];
+};
+
+export type NewSchoolInput = {
+  name: string;
+  /** 14 digits (Luhn checked). */
+  siret: string;
+  gerantEmail: string;
+  planId: string;
+  /** Subdomain: lowercase letters, digits and hyphens, 3 to 30 characters, unique, not reserved. */
+  slug: string;
+  /** Free trial before the first payment: 0 (none), 14 or 30 days. */
+  trialDays: 0 | 14 | 30;
+};
+
+/** Returned once on creation: the mock sends no e-mail, so the screen shows the provisional password. */
+export type CreatedSchool = { slug: string; name: string; url: string; gerantEmail: string; provisionalPassword: string };
+
+/** The gérant's view of the subscription (/gestion/abonnement). */
+export type SubscriptionOverview = {
+  now: string;
+  plan: PlatformPlan;
+  status: SubscriptionStatus;
+  renewsAt: string;
+  trialEndsAt: string | null;
+  unpaidSince: string | null;
+  graceEndsAt: string | null;
+  quotas: Quota[];
 };

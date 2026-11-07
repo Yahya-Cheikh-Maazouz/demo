@@ -8,6 +8,7 @@ import { readSuiteParam, safeNextPath, type LoginMotif } from "@/features/auth/r
 import { RequireTenant } from "@/features/auth/tenant-gate";
 import { getDemoAccounts } from "@/lib/api/auth";
 import { getSession } from "@/lib/session";
+import { isPlatformRequest } from "@/lib/tenant";
 
 export const metadata: Metadata = { title: "Connexion" };
 
@@ -24,7 +25,12 @@ const NOTICES: Record<LoginMotif, LoginNotice> = {
 };
 
 async function LoginSection({ searchParams }: Pick<PageProps<"/connexion">, "searchParams">) {
-  const [session, params, demoAccounts] = await Promise.all([getSession(), searchParams, getDemoAccounts()]);
+  const [session, params, demoAccounts, platform] = await Promise.all([
+    getSession(),
+    searchParams,
+    getDemoAccounts(),
+    isPlatformRequest(),
+  ]);
   const suite = readSuiteParam(params.suite);
   // Already signed in: go straight to the requested page or the user's space.
   if (session) redirect(safeNextPath(suite, session.user.role));
@@ -32,7 +38,7 @@ async function LoginSection({ searchParams }: Pick<PageProps<"/connexion">, "sea
   const motif = readSuiteParam(params.motif);
   const notice = motif && Object.hasOwn(NOTICES, motif) ? NOTICES[motif as LoginMotif] : undefined;
 
-  return <LoginForm suite={suite} notice={notice} demoAccounts={demoAccounts} />;
+  return <LoginForm suite={suite} notice={notice} demoAccounts={demoAccounts} platform={platform} />;
 }
 
 export default function LoginPage({ searchParams }: PageProps<"/connexion">) {

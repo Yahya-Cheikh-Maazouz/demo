@@ -1,5 +1,6 @@
 import { Suspense, type ReactNode } from "react";
-import { TenantBrand, TenantBrandSkeleton } from "@/components/tenant-brand";
+import { TenantBrandSkeleton } from "@/components/tenant-brand";
+import { AuthBrand } from "@/features/auth/auth-brand";
 import { AuthHelp, AuthHelpSkeleton } from "@/features/auth/auth-help";
 import { BrandPanel } from "@/features/auth/brand-panel";
 
@@ -14,7 +15,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
       <div className="flex min-h-dvh flex-col px-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+1rem)] sm:px-8 lg:px-12 xl:px-20">
         <header className="mx-auto flex min-h-16 w-full max-w-md items-center">
           <Suspense fallback={<TenantBrandSkeleton size="lg" />}>
-            <TenantBrand size="lg" />
+            <AuthBrand />
           </Suspense>
         </header>
 

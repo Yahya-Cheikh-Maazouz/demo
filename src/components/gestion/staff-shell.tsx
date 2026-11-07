@@ -1,13 +1,16 @@
 import { Suspense, type ReactNode } from "react";
-import { LogOut } from "lucide-react";
+import { CreditCard, LogOut } from "lucide-react";
+import { SubscriptionBanner } from "@/components/subscription-banner";
 import { TenantBrand, TenantBrandSkeleton } from "@/components/tenant-brand";
 import { Avatar } from "@/components/ui/avatar";
+import { ButtonLink } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { logout } from "@/features/auth/logout";
 import { getStaffUser } from "@/lib/api/gestion";
+import { getSubscriptionStatus } from "@/lib/api/subscription-status";
 import { initials } from "@/lib/format";
 import { can } from "@/lib/permissions";
-import type { Permission, Role, User } from "@/lib/types";
+import type { Permission, Role, SubscriptionStatus, User } from "@/lib/types";
 import { StaffNav, type StaffSection } from "./staff-nav";
 
 const ROLE_LABELS: Partial<Record<Role, string>> = { gerant: "Gérant", assistante: "Assistante" };
@@ -15,42 +18,68 @@ const ROLE_LABELS: Partial<Record<Role, string>> = { gerant: "Gérant", assistan
 /** Any of these opens the Réglages section (each tab then checks its own right). */
 export const SETTINGS_PERMISSIONS: Permission[] = ["tarifs.gerer", "regles.gerer", "equipe.gerer", "abonnement.gerer"];
 
-/** Sections the person may open, in navigation order. */
-export function staffSections(user: User): StaffSection[] {
+/**
+ * Sections the person may open, in navigation order. While the school is suspended, only the
+ * subscription page is left (to settle it).
+ */
+export function staffSections(user: User, status?: SubscriptionStatus | null): StaffSection[] {
   const sections: StaffSection[] = [];
-  if (can(user, "planning.voir")) sections.push("planning");
-  if (can(user, "eleves.voir")) sections.push("eleves");
-  if (can(user, "caisse.encaisser")) sections.push("caisse");
-  if (SETTINGS_PERMISSIONS.some((p) => can(user, p))) sections.push("reglages");
+  const suspended = status === "suspendu";
+  if (!suspended && can(user, "planning.voir")) sections.push("planning");
+  if (!suspended && can(user, "eleves.voir")) sections.push("eleves");
+  if (!suspended && can(user, "caisse.encaisser")) sections.push("caisse");
+  // "Réglages" (SETTINGS_PERMISSIONS) joins once its pages exist.
+  if (can(user, "abonnement.gerer")) sections.push("abonnement");
   return sections;
 }
 
 async function SidebarNav() {
-  const user = await getStaffUser();
-  return <StaffNav sections={staffSections(user)} variant="sidebar" />;
+  const [user, status] = await Promise.all([getStaffUser(), getSubscriptionStatus()]);
+  return <StaffNav sections={staffSections(user, status)} variant="sidebar" />;
 }
 
 async function TabbarNav() {
+  const [user, status] = await Promise.all([getStaffUser(), getSubscriptionStatus()]);
+  return <StaffNav sections={staffSections(user, status)} variant="tabbar" />;
+}
+
+/** The subscription banner, with a link to settle it for the people who manage the subscription. */
+async function StaffSubscriptionBanner() {
   const user = await getStaffUser();
-  return <StaffNav sections={staffSections(user)} variant="tabbar" />;
+  return (
+    <SubscriptionBanner
+      action={
+        can(user, "abonnement.gerer") ? (
+          <ButtonLink href="/gestion/abonnement" variant="secondary" icon={<CreditCard className="size-4" aria-hidden />}>
+            Gérer l&apos;abonnement
+          </ButtonLink>
+        ) : undefined
+      }
+    />
+  );
 }
 
 function NavSkeleton() {
   return (
     <div className="space-y-2 px-1">
-      <Skeleton className="h-11 rounded-xl" />
-      <Skeleton className="h-11 rounded-xl" />
-      <Skeleton className="h-11 rounded-xl" />
+      <div className="h-11 rounded-xl bg-white/5" />
+      <div className="h-11 rounded-xl bg-white/5" />
+      <div className="h-11 rounded-xl bg-white/5" />
     </div>
   );
 }
 
-function LogoutButton() {
+/** `light`: on the light top bar of a phone (the white icon of the sidebar would be invisible there). */
+function LogoutButton({ tone = "dark" }: { tone?: "dark" | "light" }) {
   return (
     <form action={logout}>
       <button
         type="submit"
-        className="flex size-11 items-center justify-center rounded-xl text-ink-subtle hover:bg-danger-soft hover:text-danger"
+        className={
+          tone === "dark"
+            ? "flex size-11 items-center justify-center rounded-xl text-white/60 hover:bg-white/10 hover:text-white focus-visible:outline-brand-bright"
+            : "flex size-11 items-center justify-center rounded-full text-ink-subtle hover:bg-danger-soft hover:text-danger"
+        }
         aria-label="Se déconnecter"
         title="Se déconnecter"
       >
@@ -65,12 +94,12 @@ async function SidebarUser() {
   return (
     <div className="flex items-center gap-3">
       <div className="flex min-w-0 flex-1 items-center gap-3 p-1.5">
-        <Avatar initials={initials(user.firstName, user.lastName)} />
+        <Avatar initials={initials(user.firstName, user.lastName)} solid />
         <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold text-ink">
+          <span className="block truncate text-sm font-semibold text-white">
             {user.firstName} {user.lastName}
           </span>
-          <span className="block truncate text-xs text-ink-subtle">{ROLE_LABELS[user.role] ?? user.email}</span>
+          <span className="block truncate text-xs text-white/60">{ROLE_LABELS[user.role] ?? user.email}</span>
         </span>
       </div>
       <LogoutButton />
@@ -89,7 +118,7 @@ async function HeaderUser() {
         <span className="block text-xs text-ink-subtle">{ROLE_LABELS[user.role]}</span>
       </span>
       <Avatar initials={initials(user.firstName, user.lastName)} size="sm" className="ml-2" />
-      <LogoutButton />
+      <LogoutButton tone="light" />
     </div>
   );
 }
@@ -108,10 +137,10 @@ export function StaffShell({ children }: { children: ReactNode }) {
         Aller au contenu
       </a>
 
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col border-r border-line bg-surface lg:flex">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-64 flex-col bg-sidebar lg:flex">
         <div className="flex h-20 items-center px-5">
           <Suspense fallback={<TenantBrandSkeleton />}>
-            <TenantBrand subtitle="Espace gestion" href="/gestion" />
+            <TenantBrand subtitle="Espace gestion" href="/gestion" tone="dark" />
           </Suspense>
         </div>
         <nav aria-label="Navigation principale" className="flex-1 overflow-y-auto px-3 py-2">
@@ -119,8 +148,8 @@ export function StaffShell({ children }: { children: ReactNode }) {
             <SidebarNav />
           </Suspense>
         </nav>
-        <div className="border-t border-line p-3">
-          <Suspense fallback={<Skeleton className="h-13 w-full rounded-xl" />}>
+        <div className="border-t border-white/10 p-3">
+          <Suspense fallback={<div className="h-13 w-full rounded-xl bg-white/5" />}>
             <SidebarUser />
           </Suspense>
         </div>
@@ -143,6 +172,9 @@ export function StaffShell({ children }: { children: ReactNode }) {
           tabIndex={-1}
           className="mx-auto w-full max-w-7xl px-4 pt-6 pb-[calc(6rem+env(safe-area-inset-bottom))] outline-none sm:px-6 lg:px-8 lg:pt-8 lg:pb-12"
         >
+          <Suspense fallback={null}>
+            <StaffSubscriptionBanner />
+          </Suspense>
           {children}
         </main>
       </div>

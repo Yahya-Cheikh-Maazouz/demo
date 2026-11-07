@@ -125,10 +125,39 @@ export function LessonPanel({ lesson, open, onClose, now, canManage, canSeeStude
           </p>
         )}
 
+        {lesson.studentReadyAt && (lesson.status === "confirme" || lesson.status === "attente_paiement") && (
+          <p className="flex items-center gap-2 text-sm font-semibold text-success">
+            <CircleCheck className="size-4" aria-hidden />
+            L&apos;élève a confirmé sa présence.
+          </p>
+        )}
+
         {state.status === "error" && state.message && (
           <Alert tone="danger" role="alert">
             {state.message}
           </Alert>
+        )}
+
+        {canManage && lesson.status === "a_confirmer" && (
+          <form action={formAction} className="border-t border-line pt-5">
+            <input type="hidden" name="lessonId" value={lesson.id} />
+            <Alert
+              tone="info"
+              title="Demande de l'élève à confirmer"
+              action={
+                <>
+                  <SubmitButton name="status" value="accepte" icon={<CircleCheck className="size-4" aria-hidden />} pendingLabel="Confirmation…">
+                    Confirmer la demande
+                  </SubmitButton>
+                  <SubmitButton name="status" value="refuse" variant="secondary" icon={<CircleX className="size-4" aria-hidden />} pendingLabel="Refus…">
+                    Refuser
+                  </SubmitButton>
+                </>
+              }
+            >
+              L&apos;élève a demandé ce créneau en ligne. Il reste réservé jusqu&apos;à votre réponse.
+            </Alert>
+          </form>
         )}
 
         {canManage && active && (

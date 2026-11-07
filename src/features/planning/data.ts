@@ -1,5 +1,5 @@
 import { cache } from "react";
-import { getBalance, getBookingRules } from "@/lib/api/eleve";
+import { getBalance, getBookingRules, getBookingWeek } from "@/lib/api/eleve";
 
 /**
  * Several Suspense boundaries of the same page need the balance or the rules:
@@ -7,3 +7,4 @@ import { getBalance, getBookingRules } from "@/lib/api/eleve";
  */
 export const getPlanningBalance = cache(getBalance);
 export const getPlanningRules = cache(getBookingRules);
+export const getPlanningWeek = cache(getBookingWeek);

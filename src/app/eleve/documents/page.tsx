@@ -23,6 +23,7 @@ export default function DocumentsPage() {
   return (
     <>
       <PageHeader
+        eyebrow="Mon dossier"
         title="Mes documents"
         description="Envoyez les pièces de votre dossier et retrouvez les documents de votre auto-école."
       />

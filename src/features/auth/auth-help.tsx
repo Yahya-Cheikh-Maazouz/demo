@@ -5,7 +5,8 @@ import { getTenant } from "@/lib/tenant";
 /** "Need help?" line with the auto-école's phone number. Render inside <Suspense>. */
 export async function AuthHelp() {
   const tenant = await getTenant();
-  if (!tenant) return null;
+  // No school (platform host), or a school created a moment ago that has not set its phone yet.
+  if (!tenant?.phone) return null;
   return (
     <p className="flex flex-wrap items-center justify-center gap-x-1 text-sm text-ink-muted lg:justify-start">
       <span>Un souci pour vous connecter&nbsp;?</span>

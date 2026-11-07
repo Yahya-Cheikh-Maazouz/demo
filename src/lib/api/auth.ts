@@ -6,24 +6,27 @@
 // to import the mock store.
 
 import { connection } from "next/server";
+import { PLATFORM_TENANT_SLUG } from "@/lib/auth-constants";
 import * as store from "@/lib/mock/store";
-import { getTenant } from "@/lib/tenant";
+import { getTenant, isPlatformRequest } from "@/lib/tenant";
 import type { ActionResult, User } from "@/lib/types";
 
 const LATENCY_MS = 250;
 const settle = () => new Promise((resolve) => setTimeout(resolve, LATENCY_MS));
 
 /**
- * Checks the credentials on the current auto-école.
- * Error codes: "identifiants_invalides", "compte_bloque" (5 failures → 15 min),
+ * Checks the credentials on the current auto-école, or of a platform account (super-admin) on
+ * the platform host. Error codes: "identifiants_invalides", "compte_bloque" (5 failures → 15 min),
+ * "compte_desactive", "suspendu" (school suspended: only its gérant signs in),
  * "auto_ecole_introuvable" (unknown subdomain). `error` is a French message ready to display.
  */
 export async function authenticate(email: string, password: string): Promise<ActionResult<{ user: User }>> {
-  const tenant = await getTenant();
+  const [tenant, platform] = await Promise.all([getTenant(), isPlatformRequest()]);
   // "now" must be a request-time value (see api/eleve.ts context()).
   await connection();
   const now = new Date();
   await settle();
+  if (platform) return store.authenticate(PLATFORM_TENANT_SLUG, email, password, now);
   if (!tenant) {
     return { ok: false, code: "auto_ecole_introuvable", error: "Cette adresse ne correspond à aucune auto-école." };
   }
@@ -63,11 +66,16 @@ export async function verifyTotp(userId: string, code: string): Promise<ActionRe
   };
 }
 
-/** User of the current auto-école, or null (unknown id or account of another school). */
+/**
+ * User of the current auto-école (or platform account on the platform host), or null (unknown id
+ * or account of another school).
+ */
 export async function findUserById(id: string): Promise<User | null> {
-  const tenant = await getTenant();
+  const [tenant, platform] = await Promise.all([getTenant(), isPlatformRequest()]);
   const user = store.findUserById(id);
-  if (!tenant || !user || user.tenantSlug !== tenant.slug) return null;
+  if (!user) return null;
+  if (platform) return user.tenantSlug === PLATFORM_TENANT_SLUG ? user : null;
+  if (!tenant || user.tenantSlug !== tenant.slug) return null;
   return user;
 }
 
@@ -94,16 +102,25 @@ const DEMO_ACCOUNTS: Record<string, DemoAccount[]> = {
     { label: "Élève", email: "jules.durand@exemple.fr", password: "demo1234" },
     { label: "Gérant", email: "gerant@ecole-dupont.fr", password: "demo1234", totpCode: "123456" },
     { label: "Assistante", email: "assistante@ecole-dupont.fr", password: "demo1234", totpCode: "123456" },
+    { label: "Moniteur", email: "sophie.laurent@ecole-dupont.fr", password: "demo1234" },
+    { label: "Parent", email: "n.fontaine@exemple.fr", password: "demo1234" },
   ],
   "conduite-plus": [
     { label: "Élève", email: "ines.martin@exemple.fr", password: "demo1234" },
     { label: "Gérant", email: "gerant@conduite-plus.fr", password: "demo1234", totpCode: "123456" },
+    { label: "Moniteur", email: "lucas.moreau@conduite-plus.fr", password: "demo1234" },
   ],
 };
 
-/** Demo accounts of the current auto-école. Always empty in production. */
+/** Platform back-office (admin.<domaine>). */
+const PLATFORM_DEMO_ACCOUNTS: DemoAccount[] = [
+  { label: "Super-admin", email: "support@plateforme-autoecole.fr", password: "demo1234", totpCode: "123456" },
+];
+
+/** Demo accounts of the current auto-école (or of the platform host). Always empty in production. */
 export async function getDemoAccounts(): Promise<DemoAccount[]> {
   if (process.env.NODE_ENV === "production") return [];
+  if (await isPlatformRequest()) return PLATFORM_DEMO_ACCOUNTS;
   const tenant = await getTenant();
   return tenant ? (DEMO_ACCOUNTS[tenant.slug] ?? []) : [];
 }

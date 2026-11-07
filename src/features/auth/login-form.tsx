@@ -27,10 +27,13 @@ export function LoginForm({
   suite,
   notice,
   demoAccounts,
+  platform = false,
 }: {
   suite?: string;
   notice?: LoginNotice;
   demoAccounts: DemoAccount[];
+  /** Platform back-office host: no self-service password reset (the support team handles it). */
+  platform?: boolean;
 }) {
   const [state, formAction] = useActionState(login, INITIAL);
   const formRef = useRef<HTMLFormElement>(null);
@@ -40,6 +43,8 @@ export function LoginForm({
   useFocusAfterError(formRef, state, state.code === "identifiants_invalides" ? "password" : undefined, alertRef);
 
   const locked = state.code === "compte_bloque";
+  const suspended = state.code === "suspendu";
+  const title = locked ? "Connexion temporairement bloquée" : suspended ? "Espace momentanément suspendu" : state.message;
 
   return (
     <div className="space-y-6">
@@ -48,9 +53,9 @@ export function LoginForm({
           <Alert
             tone="danger"
             role="alert"
-            title={locked ? "Connexion temporairement bloquée" : state.message}
+            title={title}
             action={
-              locked ? (
+              locked && !platform ? (
                 <ButtonLink
                   href="/mot-de-passe-oublie"
                   variant="secondary"
@@ -61,7 +66,7 @@ export function LoginForm({
               ) : undefined
             }
           >
-            {locked ? state.message : "Vérifiez votre saisie puis réessayez."}
+            {locked || suspended ? state.message : "Vérifiez votre saisie puis réessayez."}
           </Alert>
         </div>
       ) : (
@@ -93,9 +98,11 @@ export function LoginForm({
           aria-required
           error={state.fieldErrors?.password}
           labelAside={
-            <Link href="/mot-de-passe-oublie" className={inlineLinkStyles}>
-              Mot de passe oublié&nbsp;?
-            </Link>
+            platform ? undefined : (
+              <Link href="/mot-de-passe-oublie" className={inlineLinkStyles}>
+                Mot de passe oublié&nbsp;?
+              </Link>
+            )
           }
         />
         <SubmitButton size="lg" fullWidth pendingLabel="Connexion…" className="mt-2">

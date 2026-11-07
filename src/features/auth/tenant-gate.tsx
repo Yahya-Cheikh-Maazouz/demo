@@ -1,12 +1,12 @@
 import { Suspense, type ReactNode } from "react";
 import { headers } from "next/headers";
 import { Link2, Mail, Phone, SearchX } from "lucide-react";
-import { getTenant } from "@/lib/tenant";
+import { getTenant, isPlatformRequest } from "@/lib/tenant";
 import { FormSkeleton } from "./auth-skeletons";
 
 /**
- * Renders an auth page's content only on a known auto-école subdomain, otherwise an
- * "Auto-école introuvable" state. Used inside each page (not the layout) so the page segment
+ * Renders an auth page's content only on a known auto-école subdomain (or on the platform
+ * back-office host), otherwise an "Auto-école introuvable" state. Used inside each page (not the layout) so the page segment
  * itself always renders.
  */
 export function RequireTenant({ children, fallback }: { children: ReactNode; fallback?: ReactNode }) {
@@ -18,8 +18,8 @@ export function RequireTenant({ children, fallback }: { children: ReactNode; fal
 }
 
 async function TenantGate({ children }: { children: ReactNode }) {
-  const tenant = await getTenant();
-  if (tenant) return children;
+  const [tenant, platform] = await Promise.all([getTenant(), isPlatformRequest()]);
+  if (tenant || platform) return children;
   const host = (await headers()).get("host")?.split(":")[0] ?? "";
   return <TenantNotFound host={host} />;
 }

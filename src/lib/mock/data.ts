@@ -1,6 +1,7 @@
 // Reference data of the mock backend: auto-écoles, their staff, vehicles, accounts and students.
 // Only src/lib/mock/store.ts reads this file.
 
+import { PLATFORM_TENANT_SLUG } from "@/lib/auth-constants";
 import type {
   BookingRules,
   DocumentStatus,
@@ -48,8 +49,11 @@ export const TENANTS: Tenant[] = [
 // Staff and vehicles: each auto-école has its own, nothing is shared between tenants.
 
 export type Staff = {
-  /** The second instructor is on leave for a few days. */
-  instructors: [Instructor, Instructor];
+  /**
+   * The second instructor of the demo schools is on leave for a few days. Empty for a school just
+   * created from the platform back-office.
+   */
+  instructors: Instructor[];
   /** A lesson takes the first free vehicle with the student's gearbox. */
   vehicles: Vehicle[];
   agency: string;
@@ -133,7 +137,9 @@ export const TEAM_FIXTURES: Record<
 export const BOOKING_RULES: BookingRules = {
   minNoticeHours: 24,
   freeCancellationHours: 48,
-  maxLessonsPerWeek: 3,
+  // The client's example (meeting of 1 Nov 2026): 2 appointments and 4 h a week at most.
+  maxLessonsPerWeek: 2,
+  maxHoursPerWeek: 4,
   lateCancellationCharged: true,
   restrictedToReferent: false,
 };
@@ -325,7 +331,57 @@ export const USERS: MockUser[] = [
     password: "demo1234",
     totpCode: "123456",
   },
+  // Instructors log in with the id of their Instructor record (STAFF), so the link is direct.
+  {
+    id: "i-sophie",
+    tenantSlug: "dupont",
+    role: "moniteur",
+    firstName: "Sophie",
+    lastName: "Laurent",
+    email: "sophie.laurent@ecole-dupont.fr",
+    twoFactorEnabled: false,
+    password: "demo1234",
+  },
+  {
+    id: "i-lucas",
+    tenantSlug: "conduite-plus",
+    role: "moniteur",
+    firstName: "Lucas",
+    lastName: "Moreau",
+    email: "lucas.moreau@conduite-plus.fr",
+    twoFactorEnabled: false,
+    password: "demo1234",
+  },
+  // Legal guardian of Léa Fontaine (minor, AAC): see GUARDIANS.
+  {
+    id: "u-parent-fontaine",
+    tenantSlug: "dupont",
+    role: "parent",
+    firstName: "Nathalie",
+    lastName: "Fontaine",
+    email: "n.fontaine@exemple.fr",
+    twoFactorEnabled: false,
+    password: "demo1234",
+  },
+  // Platform support team (super-admin): signs in on admin.<domaine> only, never on a school.
+  // Fictional person and address.
+  {
+    id: "u-superadmin",
+    tenantSlug: PLATFORM_TENANT_SLUG,
+    role: "super_admin",
+    firstName: "Camille",
+    lastName: "Perrin",
+    email: "support@plateforme-autoecole.fr",
+    twoFactorEnabled: true,
+    password: "demo1234",
+    totpCode: "123456",
+  },
 ];
+
+/** Children of each parent account (student ids of the same auto-école). */
+export const GUARDIANS: Record<string, string[]> = {
+  "u-parent-fontaine": ["s-lea"],
+};
 
 // ---------------------------------------------------------------------------
 // Students

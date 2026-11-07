@@ -1,6 +1,6 @@
 import { Suspense } from "react";
-import { CalendarCheck, FileUp, Gauge, MapPin, Sparkles } from "lucide-react";
-import { getTenant } from "@/lib/tenant";
+import { Building2, CalendarCheck, FileUp, Gauge, LockKeyhole, MapPin, ReceiptText, ShieldCheck, Sparkles } from "lucide-react";
+import { getTenant, isPlatformRequest } from "@/lib/tenant";
 
 const BENEFITS = [
   {
@@ -18,6 +18,13 @@ const BENEFITS = [
     title: "Déposez vos documents",
     text: "Envoyez les pièces de votre dossier depuis votre téléphone.",
   },
+];
+
+/** What the back-office does, on the platform host (admin.<domaine>). */
+const PLATFORM_POINTS = [
+  { icon: Building2, title: "Créez une auto-école en une étape", text: "Sous-domaine, formule et compte du gérant, avec les réglages par défaut." },
+  { icon: ReceiptText, title: "Suivez les abonnements", text: "Formules, impayés, lecture seule et suspensions, au même endroit." },
+  { icon: LockKeyhole, title: "Contenu des écoles protégé", text: "Seuls les chiffres d'usage sont visibles : jamais les élèves ni les paiements." },
 ];
 
 /** Brand side of the auth pages (from lg). Colors follow the auto-école through --brand. */
@@ -56,7 +63,8 @@ function Backdrop() {
 }
 
 async function PanelContent() {
-  const tenant = await getTenant();
+  const [tenant, platform] = await Promise.all([getTenant(), isPlatformRequest()]);
+  if (platform) return <PlatformPanelContent />;
   return (
     <>
       <p className="inline-flex w-fit items-center gap-2 rounded-full bg-on-brand/10 px-3.5 py-1.5 text-sm font-semibold ring-1 ring-on-brand/20 backdrop-blur-sm">
@@ -91,7 +99,7 @@ async function PanelContent() {
         </ul>
       </div>
 
-      {tenant ? (
+      {tenant?.city ? (
         <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-on-brand/90">
           <span className="font-semibold text-on-brand">{tenant.name}</span>
           <span aria-hidden>·</span>
@@ -103,6 +111,45 @@ async function PanelContent() {
       ) : (
         <span />
       )}
+    </>
+  );
+}
+
+function PlatformPanelContent() {
+  return (
+    <>
+      <p className="inline-flex w-fit items-center gap-2 rounded-full bg-on-brand/10 px-3.5 py-1.5 text-sm font-semibold ring-1 ring-on-brand/20 backdrop-blur-sm">
+        <ShieldCheck className="size-4" aria-hidden />
+        Accès réservé à l&apos;équipe de la plateforme
+      </p>
+
+      <div className="max-w-lg">
+        <h2 className="text-4xl leading-[1.1] font-bold tracking-tight text-balance xl:text-5xl">
+          Back-office
+          <span className="block">de la plateforme.</span>
+        </h2>
+        <p className="mt-4 text-lg text-on-brand/90">
+          Les auto-écoles, leurs abonnements et leur usage. Chaque action sensible est inscrite au journal.
+        </p>
+        <ul className="mt-10 space-y-3">
+          {PLATFORM_POINTS.map(({ icon: Icon, title, text }) => (
+            <li
+              key={title}
+              className="flex items-center gap-4 rounded-2xl bg-on-brand/10 p-4 ring-1 ring-on-brand/15 backdrop-blur-sm"
+            >
+              <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-on-brand text-brand shadow-sm">
+                <Icon className="size-5" aria-hidden />
+              </span>
+              <span className="min-w-0">
+                <span className="block font-semibold">{title}</span>
+                <span className="mt-0.5 block text-sm text-on-brand/90">{text}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <span />
     </>
   );
 }

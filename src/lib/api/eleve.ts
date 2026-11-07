@@ -6,21 +6,32 @@
 
 import { connection } from "next/server";
 import { requireStudent } from "@/lib/session";
+import { subscriptionBlock } from "./subscription-status";
 import * as store from "@/lib/mock/store";
+import * as studentSpace from "@/lib/mock/student-space";
 import type {
   ActionResult,
+  Availability,
   Balance,
   BookingRules,
+  BookingWeek,
   DownloadableDocument,
   HourPack,
   Installment,
   Instructor,
   Invoice,
   Lesson,
+  LessonRequestInput,
+  Livret,
+  Mailbox,
+  Message,
+  MessageParty,
   Payment,
   PaymentMethod,
   RequiredDocument,
   Slot,
+  StartingEvaluation,
+  EvaluationResult,
   StudentProfile,
 } from "@/lib/types";
 
@@ -31,7 +42,7 @@ async function context() {
   const user = await requireStudent();
   // Cookies alone can be resolved during a prerender; connection() makes "now" a request-time value.
   await connection();
-  return { userId: user.id, now: new Date() };
+  return { userId: user.id, tenant: user.tenantSlug, now: new Date() };
 }
 
 /** Server time as ISO string. Pass it to components that need "today" (never call new Date() in render). */
@@ -123,24 +134,15 @@ export async function getDeletionRequest(): Promise<string | null> {
 // Mutations
 
 /**
- * Books a free slot. Fails with code "solde_insuffisant" when the balance does not cover it,
- * unless `acceptPendingPayment` is set: the lesson is then created as "attente_paiement".
- * Other codes: "creneau_indisponible", "limite_hebdomadaire".
+ * `late` is true past the free cancellation deadline; `chargedHours` are then deducted.
+ * `request` is true when it was a request the instructor had not confirmed yet (always free).
  */
-export async function bookSlot(
-  slotId: string,
-  options: { acceptPendingPayment?: boolean } = {},
-): Promise<ActionResult<{ lesson: Lesson }>> {
-  const { userId, now } = await context();
-  await settle();
-  return store.writeBookSlot(userId, slotId, now, options);
-}
-
-/** `late` is true past the free cancellation deadline; `chargedHours` are then deducted. */
 export async function cancelLesson(
   lessonId: string,
-): Promise<ActionResult<{ late: boolean; chargedHours: number }>> {
-  const { userId, now } = await context();
+): Promise<ActionResult<{ late: boolean; chargedHours: number; request: boolean }>> {
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeCancelLesson(userId, lessonId, now);
 }
@@ -150,7 +152,9 @@ export async function purchaseHourPack(
   packId: string,
   method: Extract<PaymentMethod, "carte" | "klarna">,
 ): Promise<ActionResult<{ invoice: Invoice }>> {
-  const { userId, now } = await context();
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writePurchasePack(userId, packId, method, now);
 }
@@ -159,7 +163,9 @@ export async function payInstallment(
   installmentId: string,
   method: Extract<PaymentMethod, "carte" | "klarna">,
 ): Promise<ActionResult<{ invoice: Invoice }>> {
-  const { userId, now } = await context();
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writePayInstallment(userId, installmentId, method, now);
 }
@@ -169,7 +175,9 @@ export async function uploadRequiredDocument(
   documentId: string,
   fileName: string,
 ): Promise<ActionResult<{ document: RequiredDocument }>> {
-  const { userId, now } = await context();
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeUploadDocument(userId, documentId, fileName, now);
 }
@@ -177,12 +185,17 @@ export async function uploadRequiredDocument(
 export async function updateContactDetails(
   input: Pick<StudentProfile, "email" | "phone" | "phoneSecondary" | "address">,
 ): Promise<ActionResult<{ profile: StudentProfile }>> {
-  const { userId, now } = await context();
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeContactDetails(userId, input, now);
 }
 
-/** RGPD: the export is prepared by the backend and sent by e-mail. */
+/**
+ * RGPD: the export is prepared by the backend and sent by e-mail. Like the deletion request below,
+ * it stays available in read-only mode: a person's rights do not depend on the school's subscription.
+ */
 export async function requestDataExport(): Promise<ActionResult> {
   await context();
   await settle();
@@ -194,4 +207,99 @@ export async function requestAccountDeletion(): Promise<ActionResult> {
   const { userId, now } = await context();
   await settle();
   return store.writeDeletionRequest(userId, now);
+}
+
+// ---------------------------------------------------------------------------
+// Booking requests (the referent instructor confirms them)
+
+/** One week of the referent's agenda, hour by hour. `weekStart` ("YYYY-MM-DD"), null for the current week. */
+export async function getBookingWeek(weekStart: string | null, type: LessonRequestInput["type"]): Promise<BookingWeek> {
+  const { userId, now } = await context();
+  return store.readBookingWeek(userId, weekStart, type, now);
+}
+
+/**
+ * The lesson is created as "a_confirmer". Codes: "invalide", "creneau_indisponible", "delai",
+ * "hors_periode", "quota_rdv", "quota_heures", "solde_insuffisant" (unless `acceptPendingPayment`).
+ */
+export async function requestLesson(
+  input: LessonRequestInput,
+  options: { acceptPendingPayment?: boolean } = {},
+): Promise<ActionResult<{ lesson: Lesson }>> {
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
+  await settle();
+  return store.writeRequestLesson(userId, input, now, options);
+}
+
+/** "Je suis prêt(e)" on an upcoming confirmed lesson. */
+export async function confirmReady(lessonId: string): Promise<ActionResult<{ lesson: Lesson }>> {
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
+  await settle();
+  return store.writeReadyForLesson(userId, lessonId, now);
+}
+
+// ---------------------------------------------------------------------------
+// Messaging
+
+export async function getMailbox(): Promise<Mailbox> {
+  const { userId, now } = await context();
+  return studentSpace.readMailbox(userId, now);
+}
+
+/** Unread received messages, for the navigation badge and the bell. */
+export async function getUnreadMessagesCount(): Promise<number> {
+  const { userId, now } = await context();
+  return studentSpace.readUnreadCount(userId, now);
+}
+
+/** Code "invalide" with fieldErrors (to, subject, body). */
+export async function sendMessage(input: { to: MessageParty; subject: string; body: string }): Promise<ActionResult<{ message: Message }>> {
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
+  await settle();
+  return studentSpace.writeSendMessage(userId, input, now);
+}
+
+export async function markMessageRead(messageId: string): Promise<ActionResult> {
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
+  return studentSpace.writeMarkMessageRead(userId, messageId, now);
+}
+
+// ---------------------------------------------------------------------------
+// Availabilities, starting evaluation, skills record
+
+/** Indicative weekly availabilities; the agency plans the lessons with them. */
+export async function updateAvailabilities(availabilities: Availability[]): Promise<ActionResult<{ availabilities: Availability[] }>> {
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
+  await settle();
+  return studentSpace.writeAvailabilities(userId, availabilities, now);
+}
+
+export async function getStartingEvaluation(): Promise<StartingEvaluation> {
+  const { userId, now } = await context();
+  return studentSpace.readStartingEvaluation(userId, now);
+}
+
+/** One attempt. Codes "incomplet" (fieldErrors keyed by question id), "deja_fait". */
+export async function submitStartingEvaluation(answers: Record<string, string>): Promise<ActionResult<{ result: EvaluationResult }>> {
+  const { userId, tenant, now } = await context();
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
+  await settle();
+  return studentSpace.writeSubmitEvaluation(userId, answers, now);
+}
+
+/** REMC skills record, filled in by the instructors (read-only for the student). */
+export async function getLivret(): Promise<Livret> {
+  const { userId, now } = await context();
+  return studentSpace.readLivret(userId, now);
 }

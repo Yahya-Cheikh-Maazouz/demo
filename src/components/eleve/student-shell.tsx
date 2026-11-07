@@ -1,33 +1,78 @@
 import Link from "next/link";
 import { Suspense, type ReactNode } from "react";
-import { LogOut } from "lucide-react";
+import { ChevronRight, CircleHelp, LogOut } from "lucide-react";
+import { SubscriptionBanner } from "@/components/subscription-banner";
 import { TenantBrand, TenantBrandSkeleton } from "@/components/tenant-brand";
 import { Avatar } from "@/components/ui/avatar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { logout } from "@/features/auth/logout";
+import { getMailbox, getStudentProfile, getUnreadMessagesCount } from "@/lib/api/eleve";
 import { initials } from "@/lib/format";
-import { getSession } from "@/lib/session";
-import { StudentNav, StudentNavFallback } from "./student-nav";
+import { getTenant } from "@/lib/tenant";
+import { MobileMenu } from "./mobile-menu";
+import { NotificationBell } from "./notification-bell";
+import { StudentNav, StudentNavFallback, StudentTabBar, StudentTabBarFallback } from "./student-nav";
 
-async function SidebarUser() {
-  const session = await getSession();
-  if (!session) return null;
-  const { user } = session;
+async function SidebarNav() {
+  const unread = await getUnreadMessagesCount();
+  return <StudentNav variant="sidebar" unread={unread} />;
+}
+
+async function TabBar() {
+  const unread = await getUnreadMessagesCount();
+  return <StudentTabBar unread={unread} menu={<MobileMenu unread={unread} />} />;
+}
+
+/** "Besoin d'aide ?" with the agency's phone number, at the bottom of the sidebar. */
+async function HelpLine() {
+  const tenant = await getTenant();
+  if (!tenant) return null;
   return (
-    <div className="flex items-center gap-3">
-      <Link href="/eleve/profil" className="flex min-w-0 flex-1 items-center gap-3 rounded-xl p-1.5 hover:bg-subtle">
-        <Avatar initials={initials(user.firstName, user.lastName)} />
-        <span className="min-w-0">
+    <a
+      href={`tel:${tenant.phone.replace(/\s/g, "")}`}
+      className="flex items-center gap-3 rounded-2xl bg-sidebar-raised p-3 text-white/80 transition-colors hover:text-white focus-visible:outline-brand-bright"
+    >
+      <CircleHelp className="size-5 shrink-0 text-brand-bright" aria-hidden />
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold text-white">Besoin d&apos;aide ?</span>
+        <span className="block text-xs tabular-nums">{tenant.phone}</span>
+      </span>
+    </a>
+  );
+}
+
+async function Bell() {
+  const mailbox = await getMailbox();
+  const items = mailbox.received
+    .filter((m) => !m.readAt)
+    .slice(0, 5)
+    .map((m) => ({ id: m.id, title: m.subject, from: m.correspondent.name, at: m.sentAt, href: `/eleve/messagerie?message=${m.id}` }));
+  return <NotificationBell items={items} now={mailbox.now} />;
+}
+
+/** Avatar, name and licence; links to the profile. */
+async function UserChip() {
+  const profile = await getStudentProfile();
+  return (
+    <div className="flex items-center gap-1">
+      <Link
+        href="/eleve/profil"
+        className="flex items-center gap-3 rounded-full border border-line bg-surface py-1 pr-3 pl-1 shadow-card transition-colors hover:bg-subtle sm:rounded-2xl sm:pr-4"
+        aria-label={`Mon profil (${profile.firstName} ${profile.lastName})`}
+      >
+        <Avatar initials={initials(profile.firstName, profile.lastName)} size="sm" solid />
+        <span className="hidden min-w-0 sm:block">
           <span className="block truncate text-sm font-semibold text-ink">
-            {user.firstName} {user.lastName}
+            {profile.firstName} {profile.lastName}
           </span>
-          <span className="block truncate text-xs text-ink-subtle">{user.email}</span>
+          <span className="block truncate text-xs text-ink-subtle">{profile.licence}</span>
         </span>
+        <ChevronRight className="hidden size-4 text-ink-subtle sm:block" aria-hidden />
       </Link>
-      <form action={logout}>
+      <form action={logout} className="hidden lg:block">
         <button
           type="submit"
-          className="flex size-11 items-center justify-center rounded-xl text-ink-subtle hover:bg-danger-soft hover:text-danger"
+          className="flex size-11 items-center justify-center rounded-full text-ink-subtle hover:bg-danger-soft hover:text-danger"
           aria-label="Se déconnecter"
           title="Se déconnecter"
         >
@@ -38,22 +83,10 @@ async function SidebarUser() {
   );
 }
 
-async function HeaderAvatar() {
-  const session = await getSession();
-  if (!session) return null;
-  const { user } = session;
-  return (
-    <Link
-      href="/eleve/profil"
-      className="flex size-11 items-center justify-center rounded-full"
-      aria-label={`Mon profil (${user.firstName} ${user.lastName})`}
-    >
-      <Avatar initials={initials(user.firstName, user.lastName)} size="sm" />
-    </Link>
-  );
-}
-
-/** Layout of the student space: sidebar from `lg`, top bar + bottom tab bar below. */
+/**
+ * Layout of the student space (after the client's reference prototype): dark grouped sidebar from
+ * `lg`, a top bar with the notifications and the profile, and a bottom tab bar + "Menu" on mobile.
+ */
 export function StudentShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-dvh">
@@ -64,41 +97,51 @@ export function StudentShell({ children }: { children: ReactNode }) {
         Aller au contenu
       </a>
 
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-68 flex-col border-r border-line bg-surface lg:flex">
-        <div className="flex h-20 items-center px-5">
+      <aside className="fixed inset-y-0 left-0 z-30 hidden w-68 flex-col bg-sidebar lg:flex">
+        <div className="flex h-20 shrink-0 items-center px-5">
           <Suspense fallback={<TenantBrandSkeleton />}>
-            <TenantBrand subtitle="Espace élève" href="/eleve" />
+            <TenantBrand subtitle="Espace élève" href="/eleve" tone="dark" />
           </Suspense>
         </div>
-        <nav aria-label="Navigation principale" className="flex-1 overflow-y-auto px-3 py-2">
+        <nav aria-label="Navigation principale" className="flex-1 overflow-y-auto px-3 pt-2 pb-4">
           <Suspense fallback={<StudentNavFallback variant="sidebar" />}>
-            <StudentNav variant="sidebar" />
+            <SidebarNav />
           </Suspense>
         </nav>
-        <div className="border-t border-line p-3">
-          <Suspense fallback={<Skeleton className="h-13 w-full rounded-xl" />}>
-            <SidebarUser />
+        <div className="shrink-0 p-3">
+          <Suspense fallback={<div className="h-16 rounded-2xl bg-sidebar-raised" />}>
+            <HelpLine />
           </Suspense>
         </div>
       </aside>
 
       <div className="lg:pl-68">
-        <header className="sticky top-0 z-30 border-b border-line bg-surface/90 pt-[env(safe-area-inset-top)] backdrop-blur-md lg:hidden">
-          <div className="flex h-14 items-center justify-between gap-3 px-4 sm:px-6">
-            <Suspense fallback={<TenantBrandSkeleton />}>
-              <TenantBrand href="/eleve" />
-            </Suspense>
-            <Suspense fallback={<Skeleton className="size-8 rounded-full" />}>
-              <HeaderAvatar />
-            </Suspense>
+        <header className="sticky top-0 z-20 border-b border-line/70 bg-canvas/85 pt-[env(safe-area-inset-top)] backdrop-blur-md lg:border-transparent lg:bg-transparent lg:backdrop-blur-none">
+          <div className="mx-auto flex h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6 lg:h-20 lg:justify-end lg:px-10">
+            <div className="min-w-0 lg:hidden">
+              <Suspense fallback={<TenantBrandSkeleton />}>
+                <TenantBrand href="/eleve" />
+              </Suspense>
+            </div>
+            <div className="flex items-center gap-2">
+              <Suspense fallback={<Skeleton className="size-11 rounded-full" />}>
+                <Bell />
+              </Suspense>
+              <Suspense fallback={<Skeleton className="h-11 w-11 rounded-full sm:w-48 sm:rounded-2xl" />}>
+                <UserChip />
+              </Suspense>
+            </div>
           </div>
         </header>
 
         <main
           id="contenu"
           tabIndex={-1}
-          className="mx-auto w-full max-w-5xl px-4 pt-6 pb-[calc(6rem+env(safe-area-inset-bottom))] outline-none sm:px-6 lg:px-10 lg:pt-10 lg:pb-14"
+          className="mx-auto w-full max-w-6xl px-4 pt-4 pb-[calc(6rem+env(safe-area-inset-bottom))] outline-none sm:px-6 lg:px-10 lg:pt-2 lg:pb-14"
         >
+          <Suspense fallback={null}>
+            <SubscriptionBanner />
+          </Suspense>
           {children}
         </main>
       </div>
@@ -107,8 +150,8 @@ export function StudentShell({ children }: { children: ReactNode }) {
         aria-label="Navigation principale"
         className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
       >
-        <Suspense fallback={<StudentNavFallback variant="tabbar" />}>
-          <StudentNav variant="tabbar" />
+        <Suspense fallback={<StudentTabBarFallback menu={<MobileMenu unread={0} />} />}>
+          <TabBar />
         </Suspense>
       </nav>
     </div>

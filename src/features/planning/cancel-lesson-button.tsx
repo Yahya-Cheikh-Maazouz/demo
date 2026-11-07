@@ -59,7 +59,7 @@ export function CancelLessonButton({ lesson, now, lateCancellationCharged }: Can
       <Dialog
         open={open}
         onClose={() => setOpen(false)}
-        title="Annuler cette leçon ?"
+        title={lesson.status === "a_confirmer" ? "Annuler cette demande ?" : "Annuler cette leçon ?"}
         description={`${type.label}, ${when}, avec ${lesson.instructor.firstName} ${lesson.instructor.lastName}`}
       >
         <CancelLessonForm
@@ -102,7 +102,8 @@ function CancelLessonForm({
     if (state.status === "error") errorRef.current?.focus();
   }, [state]);
 
-  const late = now > lesson.freeCancellationUntil;
+  const request = lesson.status === "a_confirmer";
+  const late = !request && now > lesson.freeCancellationUntil;
   const chargedHours = previewChargedHours(lesson, lateCancellationCharged);
   // "jeudi 29 octobre à 18:00", in the middle of a sentence.
   const deadline = `${formatDateLong(lesson.freeCancellationUntil).toLowerCase()} à ${formatTime(lesson.freeCancellationUntil)}`;
@@ -126,6 +127,10 @@ function CancelLessonForm({
             )}
           </p>
         </Alert>
+      ) : request ? (
+        <Alert tone="success" icon={CircleCheck} title="Annulation gratuite">
+          Votre moniteur n&apos;a pas encore confirmé cette demande : vous pouvez la retirer sans frais.
+        </Alert>
       ) : (
         <Alert tone="success" icon={CircleCheck} title="Annulation gratuite">
           Vous pouvez annuler sans frais jusqu&apos;au {deadline}.
@@ -142,14 +147,14 @@ function CancelLessonForm({
 
       <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
         <Button variant="secondary" onClick={onKeep}>
-          Garder la leçon
+          {request ? "Garder la demande" : "Garder la leçon"}
         </Button>
         <SubmitButton
           variant="danger"
           icon={<CalendarX className="size-4" aria-hidden />}
           pendingLabel="Annulation…"
         >
-          Annuler la leçon
+          {request ? "Annuler la demande" : "Annuler la leçon"}
         </SubmitButton>
       </div>
     </form>

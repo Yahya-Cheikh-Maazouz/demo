@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { CalendarClock, Hourglass, ReceiptText, ShoppingBag, Store, WalletCards } from "lucide-react";
 import { Suspense } from "react";
+import { ButtonLink } from "@/components/ui/button";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import {
@@ -11,27 +12,32 @@ import {
   PURCHASE_ANCHOR,
 } from "@/features/paiements/balance-panel";
 import { Installments, InstallmentsSkeleton } from "@/features/paiements/installments";
-import { Invoices, InvoicesSkeleton } from "@/features/paiements/invoices";
 import { PaymentHistory, PaymentHistorySkeleton } from "@/features/paiements/payment-history";
 import { Purchase, PurchaseSkeleton } from "@/features/paiements/purchase";
 
 export const metadata: Metadata = {
-  title: "Paiements et factures",
+  title: "Achats et paiements",
 };
 
 const icon = "size-5";
 
 /**
  * Student payments. Each card streams in its own Suspense boundary.
- * Mobile: one column in priority order (balance, payment plan, purchase, history, invoices).
- * Desktop: 2/3 + 1/3 rows, then the invoices table on the full width.
+ * Mobile: one column in priority order (balance, payment plan, purchase, history).
+ * Desktop: 2/3 + 1/3 rows. Invoices have their own page (/eleve/paiements/factures).
  */
 export default function PaymentsPage() {
   return (
     <>
       <PageHeader
-        title="Paiements et factures"
-        description="Votre solde d'heures, vos échéances, vos achats et vos factures."
+        eyebrow="Mon dossier"
+        title="Achats et paiements"
+        description="Votre solde d'heures, vos échéances et vos achats."
+        actions={
+          <ButtonLink href="/eleve/paiements/factures" variant="secondary" icon={<ReceiptText className="size-4" aria-hidden />}>
+            Factures et reçus
+          </ButtonLink>
+        }
       />
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -93,16 +99,6 @@ export default function PaymentsPage() {
           </Suspense>
         </Card>
 
-        <Card className="min-w-0 lg:col-span-3">
-          <CardHeader
-            title="Factures et reçus"
-            description="Générés automatiquement à chaque paiement et envoyés par e-mail."
-            icon={<ReceiptText className={icon} aria-hidden />}
-          />
-          <Suspense fallback={<InvoicesSkeleton />}>
-            <Invoices />
-          </Suspense>
-        </Card>
       </div>
     </>
   );

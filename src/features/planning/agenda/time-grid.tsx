@@ -44,6 +44,7 @@ type TimeGridProps = {
 
 /** Lesson colors by status, shared with the legend. Text stays ink for contrast. */
 export const STATUS_BLOCK: Record<LessonStatus, string> = {
+  a_confirmer: "bg-brand-soft border-dashed border-brand/50",
   confirme: "bg-info-soft border-info/30",
   effectue: "bg-success-soft border-success/30",
   annule: "bg-subtle border-line text-ink-subtle",

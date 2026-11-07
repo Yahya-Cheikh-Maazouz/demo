@@ -8,13 +8,14 @@
 // The staff administration modules (students-admin.ts, imports.ts, settings.ts) build on the
 // exports of the "Shared with the admin mock modules" section; this file never imports them.
 
-import { formatTimeRange } from "@/lib/format";
+import { dayKey, formatHours, formatTimeRange } from "@/lib/format";
 import type {
   ActionResult,
   AuditEntry,
   Balance,
   BalanceState,
   BookingRules,
+  BookingWeek,
   CashEntry,
   CashMethod,
   DocumentStatus,
@@ -25,8 +26,10 @@ import type {
   Invoice,
   Leave,
   Lesson,
+  LessonRequestInput,
   LessonType,
   MemberStatus,
+  Message,
   NewStudentInput,
   Payment,
   PaymentMethod,
@@ -48,6 +51,8 @@ import type {
   ImportSession,
   User,
   Vehicle,
+  EvaluationResult,
+  WeekSlotState,
 } from "@/lib/types";
 import {
   DEFAULT_PACKAGE_ID,
@@ -69,14 +74,41 @@ import {
   type Staff,
   type StudentFixture,
 } from "./data";
-import { parisTime, parisWeekday, parisWeekKey } from "@/lib/paris-time";
+import { addDays, mondayOf, parisDateTime, parisMinutes, parisTime, parisWeekday, parisWeekKey, weekdayOf } from "@/lib/paris-time";
 
 export { DEFAULT_TENANT_SLUG };
 
 const HOUR_MS = 3_600_000;
 
+/**
+ * An auto-école created at runtime from the platform back-office (platform.ts registers it): its
+ * public record, its gérant's account and what its first state needs (default settings).
+ */
+export type CreatedTenant = {
+  tenant: Tenant;
+  gerant: MockUser;
+  subscription: TenantState["subscription"];
+  offices: string[];
+  createdAt: string;
+};
+
 export function findTenantBySlug(slug: string): Tenant | null {
-  return TENANTS.find((t) => t.slug === slug) ?? null;
+  return TENANTS.find((t) => t.slug === slug) ?? createdTenants.get(slug)?.tenant ?? null;
+}
+
+/** Adds a school created from the back-office; its state is seeded empty on first access. */
+export function registerTenant(entry: CreatedTenant): void {
+  createdTenants.set(entry.tenant.slug, entry);
+  if (!USERS.some((u) => u.id === entry.gerant.id)) USERS.push(entry.gerant);
+}
+
+/** Every auto-école: the demo ones, then those created at runtime. */
+export function listTenants(): Tenant[] {
+  return [...TENANTS, ...[...createdTenants.values()].map((c) => c.tenant)];
+}
+
+export function findCreatedTenant(slug: string): CreatedTenant | null {
+  return createdTenants.get(slug) ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,9 +120,13 @@ const LOCK_MINUTES = 15;
 type GlobalStore = {
   __aeTenantStates?: Map<string, TenantState>;
   __aeFailedLogins?: Map<string, { count: number; lockedUntil?: number }>;
+  __aeCreatedTenants?: Map<string, CreatedTenant>;
 };
 const g = globalThis as unknown as GlobalStore;
 const failedLogins = (g.__aeFailedLogins ??= new Map());
+const createdTenants = (g.__aeCreatedTenants ??= new Map<string, CreatedTenant>());
+// The created gérants survive a hot reload of data.ts (USERS is rebuilt from the fixtures).
+for (const { gerant } of createdTenants.values()) if (!USERS.some((u) => u.id === gerant.id)) USERS.push(gerant);
 
 /** Role defaults, plus what the gérant opened, minus what they closed for this person. */
 export function effectivePermissions(role: MockUser["role"], granted: Permission[] = [], revoked: Permission[] = []): Permission[] {
@@ -166,6 +202,24 @@ export function authenticate(
   if (memberOf(user)?.status === "desactive") {
     return { ok: false, code: "compte_desactive", error: "Ce compte a été désactivé. Contactez le gérant de l'auto-école." };
   }
+  // Suspended school (unpaid subscription): only the gérant signs in, to settle it.
+  const school = findTenantBySlug(tenantSlug) ? tenantState(tenantSlug, now) : null;
+  if (school?.subscription.status === "suspendu" && user.role !== "gerant") {
+    return {
+      ok: false,
+      code: "suspendu",
+      error: "L'espace en ligne de l'auto-école est momentanément suspendu : seul le gérant peut s'y connecter. Contactez votre auto-école.",
+    };
+  }
+  if (school) {
+    school.lastSignInAt = now.toISOString();
+    const member = school.team.get(user.id);
+    if (member) {
+      member.lastActiveAt = now.toISOString();
+      // An invited account (e.g. a gérant created from the back-office) becomes active at its first sign-in.
+      if (member.status === "invitation") member.status = "actif";
+    }
+  }
   return { ok: true, data: { user: publicUser(user) } };
 }
 
@@ -190,6 +244,19 @@ export type StudentRecord = {
   deletionRequestedAt?: string;
   /** Set for students created by an import, so the import can be undone in bulk. */
   importId?: string;
+  /** Mailbox and starting evaluation, seeded on first read by student-space.ts. */
+  messages?: Message[];
+  evaluationResult?: EvaluationResult;
+  /** Skills record filled in by the instructors (C1 to C4 in %, comments), seeded on first read. */
+  livret?: { progress: [number, number, number, number]; feedback: Array<{ text: string; author: string; at: string }> };
+  /** Parent space: the legal guardian's authorisations and validations, seeded on first read by parent-space.ts. */
+  guardian?: {
+    consents: Partial<Record<import("@/lib/types").ConsentKey, { granted: boolean; decidedAt: string; decidedBy: string }>>;
+    /** `packageId`: the formula proposed by a "changement_formule". */
+    validations: Array<import("@/lib/types").GuardianValidation & { packageId?: string }>;
+    /** A payment plan was seeded once for a child who had none. */
+    planSeeded: boolean;
+  };
 };
 
 /** A person of the team. Accounts with a login also exist in USERS (password, 2FA secret). */
@@ -221,7 +288,18 @@ export type TenantState = {
   staff: Staff;
   settings: { pricing: PricingSettings; rules: SchoolRules; offices: string[] };
   team: Map<string, MemberRecord>;
-  subscription: { planId: string; status: SubscriptionStatus; renewsAt: string };
+  subscription: {
+    planId: string;
+    status: SubscriptionStatus;
+    renewsAt: string;
+    /** End of the free trial (status "essai"). */
+    trialEndsAt?: string | null;
+    /** First refused payment, and the end of the grace period before read-only (status "impaye"). */
+    unpaidSince?: string | null;
+    graceEndsAt?: string | null;
+  };
+  /** Last successful sign-in of anyone of the school (platform usage). */
+  lastSignInAt?: string;
   students: Map<string, StudentRecord>;
   lessons: Lesson[];
   invoices: Array<Invoice & { studentId: string }>;
@@ -239,7 +317,8 @@ const tenantStates = (g.__aeTenantStates ??= new Map<string, TenantState>());
 
 /** Types that consume hours of the driving package. */
 const COUNTED_TYPES: LessonType[] = ["conduite", "examen_blanc"];
-const isActive = (l: Lesson) => l.status === "confirme" || l.status === "attente_paiement";
+/** Booked and not done yet; a request waiting for the instructor counts too (it holds the slot and the hours). */
+const isActive = (l: Lesson) => l.status === "a_confirmer" || l.status === "confirme" || l.status === "attente_paiement";
 /** Takes up the instructor, the vehicle and the student (past lessons included). */
 const occupies = (l: Lesson) => l.status !== "annule";
 
@@ -253,7 +332,7 @@ export function tenantState(slug: string, now: Date): TenantState {
 }
 
 /** Tenant and record of a student who has a login. */
-function studentContext(userId: string, now: Date): { t: TenantState; s: StudentRecord } {
+export function studentContext(userId: string, now: Date): { t: TenantState; s: StudentRecord } {
   const user = findUserById(userId);
   if (!user || user.role !== "eleve") throw new Error(`Unknown student ${userId}`);
   const t = tenantState(user.tenantSlug, now);
@@ -421,12 +500,13 @@ function scriptedLessons(t: TenantState, studentId: string, now: Date): Lesson[]
     newLesson(t, { ...base, id: id("07"), start: at(-7, 18), hours: 2, status: "effectue" }),
     newLesson(t, { ...base, id: id("08"), start: at(2, 18), hours: 2 }),
     newLesson(t, { ...base, ...code, id: id("09"), start: at(4, 19), hours: 1 }),
-    newLesson(t, { ...base, id: id("10"), start: at(6, 8), hours: 2 }),
+    // A request the instructor has not confirmed yet.
+    newLesson(t, { ...base, id: id("10"), start: at(6, 8), hours: 2, status: "a_confirmer" }),
   ];
 }
 
 const GENERATED_HOURS = { weekday: [8, 10, 14, 16, 18], saturday: [8, 10] };
-/** Below the booking rule (3), so the demo students stay around their 20 h package. */
+/** At the booking rule (2 a week), so the demo students stay around their 20 h package. */
 const GENERATED_WEEKLY_CAP = 2;
 
 /**
@@ -586,23 +666,25 @@ function seedPayments(t: TenantState, f: StudentFixture, now: Date) {
 }
 
 /** Accounts with a login (USERS) plus the instructors and pending invitations of the school. */
-function seedTeam(slug: string, now: Date): Map<string, MemberRecord> {
+function seedTeam(slug: string, now: Date, created: CreatedTenant | null = null): Map<string, MemberRecord> {
   const team = new Map<string, MemberRecord>();
   for (const u of USERS) {
     if (u.tenantSlug !== slug || (u.role !== "gerant" && u.role !== "assistante")) continue;
+    // The gérant of a new school is invited (provisional password) until their first sign-in.
+    const invited = created?.gerant.id === u.id;
     team.set(u.id, {
       id: u.id,
       firstName: u.firstName,
       lastName: u.lastName,
       email: u.email,
       role: u.role,
-      status: "actif",
+      status: invited ? "invitation" : "actif",
       twoFactorEnabled: u.twoFactorEnabled,
       office: null,
       granted: [...(u.grantedPermissions ?? [])],
       revoked: [...(u.revokedPermissions ?? [])],
-      lastActiveAt: parisTime(now, 0, 8, 30).toISOString(),
-      invitedAt: null,
+      lastActiveAt: invited ? null : parisTime(now, 0, 8, 30).toISOString(),
+      invitedAt: invited ? created.createdAt : null,
     });
   }
   for (const m of TEAM_FIXTURES[slug] ?? []) {
@@ -625,33 +707,47 @@ function seedTeam(slug: string, now: Date): Map<string, MemberRecord> {
   return team;
 }
 
+/** A school just created from the back-office: no instructor, vehicle or meeting point yet. */
+const emptyStaff = (): Staff => ({ instructors: [], vehicles: [], agency: "", meetingPoints: {} });
+
 function seedTenant(slug: string, now: Date): TenantState {
-  const staff = STAFF[slug] ?? STAFF[DEFAULT_TENANT_SLUG];
+  // Created from the back-office: an empty school with the default settings and its gérant only.
+  const created = createdTenants.get(slug) ?? null;
+  const staff = STAFF[slug] ?? emptyStaff();
   const fixtures = STUDENTS[slug] ?? [];
   const pricing = structuredClone(DEFAULT_PRICING);
-  const subscription = SUBSCRIPTIONS[slug] ?? SUBSCRIPTIONS[DEFAULT_TENANT_SLUG];
+  const fixture = SUBSCRIPTIONS[slug] ?? SUBSCRIPTIONS[DEFAULT_TENANT_SLUG];
+  const onLeave = staff.instructors[1];
   const t: TenantState = {
     slug,
     staff,
-    settings: { pricing, rules: structuredClone(DEFAULT_RULES), offices: [...(OFFICES[slug] ?? [])] },
-    team: seedTeam(slug, now),
-    subscription: {
-      planId: subscription.planId,
-      status: subscription.status,
-      renewsAt: parisTime(now, subscription.renewsInDays, 0).toISOString(),
+    settings: {
+      pricing,
+      rules: structuredClone(DEFAULT_RULES),
+      offices: [...(created?.offices ?? OFFICES[slug] ?? [])],
     },
+    team: seedTeam(slug, now, created),
+    subscription: created
+      ? { ...created.subscription }
+      : {
+          planId: fixture.planId,
+          status: fixture.status,
+          renewsAt: parisTime(now, fixture.renewsInDays, 0).toISOString(),
+        },
     students: new Map(),
     lessons: [],
     invoices: [],
-    leaves: [
-      {
-        id: `leave-${staff.instructors[1].id}`,
-        instructorId: staff.instructors[1].id,
-        start: parisTime(now, 3, 0).toISOString(),
-        end: parisTime(now, 6, 0).toISOString(),
-        reason: "Congés",
-      },
-    ],
+    leaves: onLeave
+      ? [
+          {
+            id: `leave-${onLeave.id}`,
+            instructorId: onLeave.id,
+            start: parisTime(now, 3, 0).toISOString(),
+            end: parisTime(now, 6, 0).toISOString(),
+            reason: "Congés",
+          },
+        ]
+      : [],
     cashEntries: [],
     imports: new Map(),
     audit: [],
@@ -703,9 +799,17 @@ function seedTenant(slug: string, now: Date): TenantState {
       status: "a_valider",
     });
   }
-  // A few past changes, so the journal of the settings is not empty.
+  // Some upcoming lessons are still requests waiting for the instructor.
+  for (const l of t.lessons) {
+    const student = fixtures.find((f) => f.id === l.studentId);
+    if (student && !student.scripted && l.status === "confirme" && Date.parse(l.start) > now.getTime() && hash(Date.parse(l.start), l.studentId.length) % 6 === 0) {
+      l.status = "a_confirmer";
+    }
+  }
+
+  // A few past changes, so the journal of the settings is not empty (a new school has no history).
   const gerant = USERS.find((u) => u.tenantSlug === slug && u.role === "gerant");
-  if (gerant) {
+  if (gerant && !created) {
     logAudit(t, fullName(gerant), "tarifs", "Tarif horaire : 58 € → 60 €", parisTime(now, -20, 9, 12));
     logAudit(t, fullName(gerant), "regles", "Délai d'annulation gratuite : 24 h → 48 h", parisTime(now, -14, 18, 40));
   }
@@ -715,7 +819,7 @@ function seedTenant(slug: string, now: Date): TenantState {
 // ---------------------------------------------------------------------------
 // Balance
 
-function computeBalance(t: TenantState, studentId: string, now: Date): Balance {
+export function computeBalance(t: TenantState, studentId: string, now: Date): Balance {
   const s = t.students.get(studentId);
   const nowIso = now.toISOString();
   const lowThresholdHours = t.settings.rules.lowBalanceThresholdHours;
@@ -893,61 +997,183 @@ export function readDeletionRequest(userId: string, now: Date): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Student mutations
+// Student booking requests: week grid of the referent instructor
 
-export function writeBookSlot(
+/** Opening hours of the lessons (start of the first hour, end of the last one). Closed on Sunday. */
+const OPENING = { weekday: { from: 8, to: 20 }, saturday: { from: 8, to: 13 } };
+/** Weeks open to requests, the current one included. */
+const BOOKABLE_WEEKS = 4;
+const REQUEST_DURATIONS = [1, 1.5, 2];
+const REQUESTABLE_TYPES: LessonType[] = ["conduite", "code"];
+
+function openingOf(key: string) {
+  const weekday = weekdayOf(key);
+  if (weekday === 0) return null;
+  return weekday === 6 ? OPENING.saturday : OPENING.weekday;
+}
+
+/** Driving and code lessons the student requested or booked in the Paris week starting `weekStart`. */
+function bookedInWeek(t: TenantState, studentId: string, weekStart: string, ignoreLessonId?: string) {
+  const lessons = t.lessons.filter(
+    (l) =>
+      l.id !== ignoreLessonId &&
+      l.studentId === studentId &&
+      REQUESTABLE_TYPES.includes(l.type) &&
+      isActive(l) &&
+      parisWeekKey(new Date(l.start)) === weekStart,
+  );
+  return { lessons: lessons.length, hours: lessons.reduce((sum, l) => sum + l.durationHours, 0) };
+}
+
+/**
+ * One week (Monday to Saturday) of the referent's agenda, hour by hour, for a driving or a code
+ * lesson. `weekStart` is clamped to the bookable weeks; null means the current week.
+ */
+export function readBookingWeek(userId: string, weekStart: string | null, type: LessonRequestInput["type"], now: Date): BookingWeek {
+  const { t, s } = studentContext(userId, now);
+  const rules = t.settings.rules.booking;
+  const firstWeekStart = parisWeekKey(now);
+  const lastWeekStart = addDays(firstWeekStart, 7 * (BOOKABLE_WEEKS - 1));
+  const requested = weekStart ? mondayOf(weekStart) : firstWeekStart;
+  const week = requested < firstWeekStart ? firstWeekStart : requested > lastWeekStart ? lastWeekStart : requested;
+
+  const instructor = s.profile.referentInstructor;
+  const gearbox = gearboxOf(s.profile);
+  const earliest = now.getTime() + rules.minNoticeHours * HOUR_MS;
+  const hours = Array.from({ length: OPENING.weekday.to - OPENING.weekday.from }, (_, i) => OPENING.weekday.from + i);
+
+  const days = Array.from({ length: 6 }, (_, index) => {
+    const date = addDays(week, index);
+    const opening = openingOf(date);
+    const slots = hours.map((hour) => {
+      const start = parisDateTime(date, hour);
+      const startMs = start.getTime();
+      const endMs = startMs + HOUR_MS;
+      let state: WeekSlotState = "libre";
+      if (!opening || hour < opening.from || hour + 1 > opening.to) state = "ferme";
+      else if (startMs < earliest) state = "passe";
+      else if (
+        findConflicts(t, { start: startMs, end: endMs, instructorId: instructor.id, vehicleId: null, studentId: userId }).length > 0 ||
+        (type === "conduite" && !freeVehicle(t, gearbox, startMs, endMs))
+      ) {
+        state = "pris";
+      }
+      return { start: start.toISOString(), state };
+    });
+    return { date, slots };
+  });
+
+  return {
+    now: now.toISOString(),
+    weekStart: week,
+    instructor,
+    hours: hours.map((h) => `${String(h).padStart(2, "0")}:00`),
+    days,
+    booked: bookedInWeek(t, userId, week),
+    rules,
+    firstWeekStart,
+    lastWeekStart,
+  };
+}
+
+/**
+ * Sends a lesson request to the referent instructor: it holds the slot as "a_confirmer" until the
+ * instructor (or the agency) confirms it. Codes: "invalide", "creneau_indisponible", "delai",
+ * "hors_periode", "quota_rdv", "quota_heures", "solde_insuffisant" (driving lessons only, unless
+ * `acceptPendingPayment`: the lesson then waits for a payment once confirmed).
+ */
+export function writeRequestLesson(
   userId: string,
-  slotId: string,
+  input: LessonRequestInput,
   now: Date,
   options: { acceptPendingPayment?: boolean } = {},
 ): ActionResult<{ lesson: Lesson }> {
   const { t, s } = studentContext(userId, now);
-  const slot = readAvailableSlots(userId, now).find((x) => x.id === slotId);
-  if (!slot) {
-    return { ok: false, code: "creneau_indisponible", error: "Ce créneau n'est plus disponible. Choisissez-en un autre." };
+  const rules = t.settings.rules.booking;
+  const start = Date.parse(input.start);
+  if (!REQUESTABLE_TYPES.includes(input.type) || !REQUEST_DURATIONS.includes(input.durationHours) || Number.isNaN(start)) {
+    return { ok: false, code: "invalide", error: "Cette demande n'est pas valide. Choisissez un créneau dans l'agenda." };
+  }
+  const end = start + input.durationHours * HOUR_MS;
+  const date = dayKey(input.start);
+  const opening = openingOf(date);
+  const startMinutes = parisMinutes(input.start);
+  const endMinutes = startMinutes + input.durationHours * 60;
+  if (!opening || startMinutes % 30 !== 0 || startMinutes < opening.from * 60 || endMinutes > opening.to * 60) {
+    return { ok: false, code: "creneau_indisponible", error: "Ce créneau est en dehors des horaires de l'auto-école." };
+  }
+  if (start < now.getTime() + rules.minNoticeHours * HOUR_MS) {
+    return { ok: false, code: "delai", error: `Les demandes se font au moins ${rules.minNoticeHours} h avant la leçon.` };
+  }
+  const week = parisWeekKey(new Date(start));
+  if (week > addDays(parisWeekKey(now), 7 * (BOOKABLE_WEEKS - 1))) {
+    return { ok: false, code: "hors_periode", error: `Les demandes sont ouvertes sur les ${BOOKABLE_WEEKS} prochaines semaines.` };
   }
 
-  const week = parisWeekKey(new Date(slot.start));
-  const lessonsThatWeek = t.lessons.filter(
-    (l) => l.studentId === userId && COUNTED_TYPES.includes(l.type) && isActive(l) && parisWeekKey(new Date(l.start)) === week,
-  ).length;
-  const { maxLessonsPerWeek } = t.settings.rules.booking;
-  if (lessonsThatWeek >= maxLessonsPerWeek) {
+  const phone = findTenantBySlug(t.slug)?.phone;
+  const callAgency = phone ? `appelez le secrétariat au ${phone}` : "appelez le secrétariat";
+  const booked = bookedInWeek(t, userId, week);
+  if (booked.lessons + 1 > rules.maxLessonsPerWeek) {
     return {
       ok: false,
-      code: "limite_hebdomadaire",
-      error: `Vous avez déjà ${maxLessonsPerWeek} leçons cette semaine-là, le maximum fixé par l'auto-école.`,
+      code: "quota_rdv",
+      error: `Votre quota de ${rules.maxLessonsPerWeek} rendez-vous par semaine est atteint. Choisissez une autre semaine ou ${callAgency}.`,
+    };
+  }
+  if (booked.hours + input.durationHours > rules.maxHoursPerWeek) {
+    return {
+      ok: false,
+      code: "quota_heures",
+      error: `Cette demande dépasse votre maximum de ${formatHours(rules.maxHoursPerWeek)} par semaine (${formatHours(booked.hours)} déjà demandées). Choisissez une durée plus courte, une autre semaine, ou ${callAgency}.`,
     };
   }
 
-  const balance = computeBalance(t, userId, now);
-  const uncovered = balance.afterReservationsHours - slot.durationHours < 0;
-  if (uncovered && !options.acceptPendingPayment) {
-    return {
-      ok: false,
-      code: "solde_insuffisant",
-      error: `Votre solde ne couvre pas cette leçon de ${slot.durationHours} h. Réglez des heures, ou envoyez la demande à l'auto-école pour validation.`,
-    };
+  const instructor = s.profile.referentInstructor;
+  const vehicle = input.type === "conduite" ? freeVehicle(t, gearboxOf(s.profile), start, end) : null;
+  const unavailable = { ok: false as const, code: "creneau_indisponible", error: "Ce créneau n'est plus libre. Choisissez-en un autre." };
+  if (input.type === "conduite" && !vehicle) return unavailable;
+  if (findConflicts(t, { start, end, instructorId: instructor.id, vehicleId: vehicle?.id ?? null, studentId: userId }).length > 0) {
+    return unavailable;
   }
 
-  const start = new Date(slot.start);
-  const vehicle = freeVehicle(t, gearboxOf(s.profile), start.getTime(), Date.parse(slot.end));
-  if (!vehicle) {
-    return { ok: false, code: "creneau_indisponible", error: "Ce créneau n'est plus disponible. Choisissez-en un autre." };
+  if (input.type === "conduite" && !options.acceptPendingPayment) {
+    const balance = computeBalance(t, userId, now);
+    if (balance.afterReservationsHours - input.durationHours < 0) {
+      return {
+        ok: false,
+        code: "solde_insuffisant",
+        error: `Votre crédit ne couvre pas cette leçon de ${formatHours(input.durationHours)}. Rechargez votre solde, ou envoyez quand même la demande : la leçon attendra votre paiement.`,
+      };
+    }
   }
-  const booked = newLesson(t, {
+
+  const lesson = newLesson(t, {
     studentId: userId,
-    type: "conduite",
-    status: uncovered ? "attente_paiement" : "confirme",
-    start,
-    hours: slot.durationHours,
-    instructor: slot.instructor,
+    type: input.type,
+    status: "a_confirmer",
+    start: new Date(start),
+    hours: input.durationHours,
+    instructor,
     vehicle,
-    meetingPoint: slot.meetingPoint,
+    meetingPoint: vehicle ? undefined : t.staff.agency,
   });
-  t.lessons.push(booked);
-  return { ok: true, data: { lesson: booked } };
+  t.lessons.push(lesson);
+  return { ok: true, data: { lesson } };
 }
+
+/** "Je suis prêt(e)": the student confirms they will attend an upcoming confirmed lesson. */
+export function writeReadyForLesson(userId: string, lessonId: string, now: Date): ActionResult<{ lesson: Lesson }> {
+  const { t } = studentContext(userId, now);
+  const lesson = t.lessons.find((l) => l.id === lessonId && l.studentId === userId);
+  if (!lesson || lesson.start <= now.toISOString() || (lesson.status !== "confirme" && lesson.status !== "attente_paiement")) {
+    return { ok: false, code: "introuvable", error: "Cette leçon n'attend plus de confirmation de présence." };
+  }
+  lesson.studentReadyAt ??= now.toISOString();
+  return { ok: true, data: { lesson } };
+}
+
+// ---------------------------------------------------------------------------
+// Student mutations
 
 function cancel(t: TenantState, target: Lesson, now: Date, options: { noShow?: boolean } = {}) {
   const late = now.toISOString() > target.freeCancellationUntil;
@@ -966,7 +1192,7 @@ export function writeCancelLesson(
   userId: string,
   lessonId: string,
   now: Date,
-): ActionResult<{ late: boolean; chargedHours: number }> {
+): ActionResult<{ late: boolean; chargedHours: number; request: boolean }> {
   const { t } = studentContext(userId, now);
   const target = t.lessons.find((l) => l.id === lessonId && l.studentId === userId);
   if (!target || target.start <= now.toISOString()) {
@@ -975,7 +1201,8 @@ export function writeCancelLesson(
   if (!isActive(target)) {
     return { ok: false, code: "deja_annulee", error: "Cette leçon est déjà annulée." };
   }
-  return { ok: true, data: cancel(t, target, now) };
+  const request = target.status === "a_confirmer";
+  return { ok: true, data: { ...cancel(t, target, now), request } };
 }
 
 export function recordPayment(
@@ -1314,6 +1541,9 @@ export function writeLessonStatus(
   const lesson = t.lessons.find((l) => l.id === lessonId);
   if (!lesson || !isActive(lesson)) return { ok: false, code: "introuvable", error: "Ce RDV n'est plus modifiable." };
   if (status === "effectue") {
+    if (lesson.status === "a_confirmer") {
+      return { ok: false, code: "a_confirmer", error: "Confirmez d'abord la demande de l'élève." };
+    }
     if (lesson.start > now.toISOString()) {
       return { ok: false, code: "pas_commence", error: "Une leçon ne peut être marquée effectuée qu'une fois commencée." };
     }
@@ -1322,6 +1552,30 @@ export function writeLessonStatus(
   }
   const { chargedHours } = cancel(t, lesson, now, options);
   return { ok: true, data: { chargedHours } };
+}
+
+/**
+ * Confirms a student's request (it becomes "confirme", or "attente_paiement" when the balance does
+ * not cover it) or refuses it (cancelled, nothing charged).
+ */
+export function writeReviewLessonRequest(
+  tenantSlug: string,
+  lessonId: string,
+  decision: "accepte" | "refuse",
+  now: Date,
+): ActionResult<{ lesson: Lesson }> {
+  const t = tenantState(tenantSlug, now);
+  const lesson = t.lessons.find((l) => l.id === lessonId);
+  if (!lesson || lesson.status !== "a_confirmer") {
+    return { ok: false, code: "deja_traitee", error: "Cette demande a déjà été traitée." };
+  }
+  if (decision === "refuse") {
+    lesson.status = "annule";
+    return { ok: true, data: { lesson } };
+  }
+  const covered = !COUNTED_TYPES.includes(lesson.type) || computeBalance(t, lesson.studentId, now).afterReservationsHours >= 0;
+  lesson.status = covered ? "confirme" : "attente_paiement";
+  return { ok: true, data: { lesson } };
 }
 
 export function writeReviewDocument(
@@ -1439,6 +1693,11 @@ export function findDuplicateStudent(
     if (neph && s.profile.neph === neph) return { field: "neph", student: s };
   }
   return null;
+}
+
+/** Status of the school's subscription to the platform (drives read-only and suspended modes). */
+export function readSubscriptionStatus(tenantSlug: string, now: Date): SubscriptionStatus {
+  return tenantState(tenantSlug, now).subscription.status;
 }
 
 export function readOffices(tenantSlug: string, now: Date): string[] {

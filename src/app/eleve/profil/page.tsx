@@ -34,7 +34,11 @@ const icon = "size-5";
 export default function ProfilePage() {
   return (
     <>
-      <PageHeader title="Mon profil" description="Vos informations, vos coordonnées et vos données personnelles." />
+      <PageHeader
+        eyebrow="Mes informations"
+        title="Mon profil"
+        description="Vos informations, vos coordonnées et vos données personnelles."
+      />
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_20rem] xl:items-start">
         <div className="flex min-w-0 flex-col gap-6">
@@ -91,7 +95,6 @@ export default function ProfilePage() {
             <Suspense fallback={<AvailabilitiesSkeleton />}>
               <Availabilities />
             </Suspense>
-            <SchoolContactNote lead="Pour les modifier," />
           </Card>
 
           <Card>

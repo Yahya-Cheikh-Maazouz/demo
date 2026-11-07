@@ -5,8 +5,9 @@ import { LoadingLabel, Skeleton } from "@/components/ui/skeleton";
 import { BalanceSummary } from "@/features/solde/balance-summary";
 import { formatCurrency } from "@/lib/format";
 import { getPageBalance } from "./data";
+import { PURCHASE_ANCHOR } from "./links";
 
-export const PURCHASE_ANCHOR = "acheter-des-heures";
+export { PURCHASE_ANCHOR };
 
 /** "Forfait B — 20 h · 60 € / h", for the card header. Render inside <Suspense>. */
 export async function PackageLine() {

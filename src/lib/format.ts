@@ -116,6 +116,13 @@ export function formatHours(hours: number): string {
   return `${decimal.format(hours)} h`;
 }
 
+const percent = new Intl.NumberFormat(LOCALE, { style: "percent", maximumFractionDigits: 0 });
+
+/** "62 %" from a value between 0 and 100 (narrow no-break space before the sign). */
+export function formatPercent(value: number): string {
+  return percent.format(value / 100);
+}
+
 /** "850 Ko", "2,4 Mo" */
 export function formatFileSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${decimal.format(Math.max(1, Math.round(bytes / 1024)))} Ko`;

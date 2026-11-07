@@ -6,16 +6,17 @@
  * by <TenantTheme /> as --brand on :root.
  */
 @theme {
-  --font-sans: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
 
-  --color-canvas: #f6f7f9;
+  /* Neutrals tinted towards green, like the client's reference prototype. */
+  --color-canvas: #f3f7f6;
   --color-surface: #ffffff;
-  --color-subtle: #f1f5f9;
-  --color-line: #e2e8f0;
-  --color-line-strong: #cbd5e1;
-  --color-ink: #0f172a;
-  --color-ink-muted: #475569;
-  --color-ink-subtle: #64748b;
+  --color-subtle: #eef3f2;
+  --color-line: #e1e9e7;
+  --color-line-strong: #c9d6d3;
+  --color-ink: #11211e;
+  --color-ink-muted: #4a5c58;
+  --color-ink-subtle: #64746f;
   --color-on-brand: #ffffff;
 
   --color-success: #15803d;
@@ -27,8 +28,8 @@
   --color-info: #1d4ed8;
   --color-info-soft: #eff6ff;
 
-  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.06);
-  --shadow-raised: 0 10px 30px -12px rgb(15 23 42 / 0.18), 0 2px 6px rgb(15 23 42 / 0.05);
+  --shadow-card: 0 1px 2px rgb(17 33 30 / 0.04), 0 8px 24px -16px rgb(17 33 30 / 0.12);
+  --shadow-raised: 0 18px 40px -18px rgb(17 33 30 / 0.28), 0 2px 6px rgb(17 33 30 / 0.05);
 }
 
 /* `inline` so utilities reference var(--brand) directly and follow tenant overrides. */
@@ -36,12 +37,30 @@
   --color-brand: var(--brand);
   --color-brand-strong: var(--brand-strong);
   --color-brand-soft: var(--brand-soft);
+  --color-brand-bright: var(--brand-bright);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-raised: var(--sidebar-raised);
 }
 
 :root {
   --brand: #0f766e;
   --brand-strong: color-mix(in oklab, var(--brand) 82%, black);
   --brand-soft: color-mix(in oklab, var(--brand) 9%, white);
+  /* Brand on dark backgrounds (sidebar, hero cards). */
+  --brand-bright: color-mix(in oklab, var(--brand) 55%, white);
+  /* Deep, brand-tinted navigation background: white text on it stays above 12:1. */
+  --sidebar: color-mix(in oklab, var(--brand) 22%, #06100f);
+  --sidebar-raised: color-mix(in oklab, var(--brand) 30%, #0b1a18);
+}
+
+/* Small uppercase label above a heading ("MON PLANNING", "PROCHAINE LEÇON"). */
+@utility eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+  color: var(--brand);
 }
 
 @layer base {
@@ -50,7 +69,10 @@
   }
 
   body {
-    background: var(--color-canvas);
+    background:
+      radial-gradient(60rem 28rem at 70% -8rem, color-mix(in oklab, var(--brand) 7%, transparent), transparent 70%),
+      var(--color-canvas);
+    background-attachment: fixed;
     color: var(--color-ink);
     font-family: var(--font-sans);
   }

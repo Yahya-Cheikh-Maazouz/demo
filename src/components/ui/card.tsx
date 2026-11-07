@@ -2,7 +2,7 @@ import type { ComponentProps, ReactNode } from "react";
 import { cn } from "@/lib/cn";
 
 export function Card({ className, ...props }: ComponentProps<"div">) {
-  return <div className={cn("rounded-2xl border border-line bg-surface shadow-card", className)} {...props} />;
+  return <div className={cn("rounded-3xl border border-line/80 bg-surface shadow-card", className)} {...props} />;
 }
 
 type CardHeaderProps = {
@@ -25,7 +25,7 @@ export function CardHeader({ title, description, action, as: Heading = "h2", ico
           </span>
         )}
         <div className="min-w-0">
-          <Heading className="text-base font-bold text-ink">{title}</Heading>
+          <Heading className="text-base font-bold tracking-[-0.01em] text-ink">{title}</Heading>
           {description && <p className="mt-0.5 text-sm text-ink-muted">{description}</p>}
         </div>
       </div>

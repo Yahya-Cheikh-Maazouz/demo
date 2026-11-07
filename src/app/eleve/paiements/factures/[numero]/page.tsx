@@ -35,11 +35,11 @@ export default function InvoicePage({ params }: Props) {
 
       <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between print:hidden">
         <Link
-          href="/eleve/paiements"
+          href="/eleve/paiements/factures"
           className="-ml-2 inline-flex h-11 items-center gap-1.5 self-start rounded-lg px-2 text-sm font-semibold text-ink-muted transition-colors hover:bg-subtle hover:text-ink"
         >
           <ArrowLeft className="size-4" aria-hidden />
-          Paiements et factures
+          Factures et reçus
         </Link>
         <Suspense fallback={<Skeleton className="h-11 w-full rounded-xl sm:w-48" />}>
           <InvoicePrintAction number={number} />

@@ -1,14 +1,25 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
-import { CalendarPlus } from "lucide-react";
-import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { BookingConfirmation } from "@/features/planning/booking-confirmation";
-import { BookingRulesBody, BookingRulesHeader, BookingRulesSkeleton } from "@/features/planning/booking-rules-card";
 import { CalendarFeedBody, CalendarFeedHeader, CalendarFeedSkeleton } from "@/features/planning/calendar-feed";
-import { LessonsPanel, LessonsPanelSkeleton } from "@/features/planning/lesson-list";
+import {
+  Appointments,
+  AppointmentsSkeleton,
+  BookingCard,
+  BookingCardSkeleton,
+  HowItWorks,
+  HowItWorksSkeleton,
+  parsePlanningQuery,
+  PlanningStats,
+  PlanningStatsSkeleton,
+  SecretariatPill,
+} from "@/features/planning/planning-sections";
 import { PlanningFeedbackProvider, PlanningFeedbackRegion } from "@/features/planning/planning-feedback";
+import { getLessons } from "@/lib/api/eleve";
+import { formatDateLong, formatTime } from "@/lib/format";
 
 export const metadata: Metadata = {
   title: "Mon planning",
@@ -16,56 +27,74 @@ export const metadata: Metadata = {
 
 type SearchParams = PageProps<"/eleve/planning">["searchParams"];
 
-/** Confirmation banner after a booking (?reservee=1, &attente=1 when it waits for payment). */
-async function BookingConfirmationSection({ searchParams }: { searchParams: SearchParams }) {
-  const params = await searchParams;
-  if (params.reservee !== "1") return null;
+/** Banner after a request (?demande=<lesson id>), naming the instructor and the slot. */
+async function RequestConfirmation({ searchParams }: { searchParams: SearchParams }) {
+  const query = parsePlanningQuery(await searchParams);
+  if (!query.requestId) return null;
+  const { upcoming } = await getLessons();
+  const lesson = upcoming.find((l) => l.id === query.requestId && l.status === "a_confirmer");
+  if (!lesson) return null;
+  const params = new URLSearchParams({ type: query.type });
+  if (query.week) params.set("semaine", query.week);
   return (
     <BookingConfirmation
-      pendingPayment={params.attente === "1"}
-      dismissHref={params.vue === "historique" ? "/eleve/planning?vue=historique" : "/eleve/planning"}
+      summary={`à ${lesson.instructor.firstName} ${lesson.instructor.lastName} pour le ${formatDateLong(lesson.start).toLowerCase()} à ${formatTime(lesson.start)}`}
+      pendingPayment={false}
+      dismissHref={`/eleve/planning?${params.toString()}`}
     />
   );
 }
 
+async function Stats({ searchParams }: { searchParams: SearchParams }) {
+  return <PlanningStats query={parsePlanningQuery(await searchParams)} />;
+}
+
+async function Booking({ searchParams }: { searchParams: SearchParams }) {
+  return <BookingCard query={parsePlanningQuery(await searchParams)} />;
+}
+
+async function MyAppointments({ searchParams }: { searchParams: SearchParams }) {
+  return <Appointments query={parsePlanningQuery(await searchParams)} />;
+}
+
 /**
- * Student planning: upcoming lessons grouped by day (with cancellation) or the history.
- * Wide screens: lessons on 2/3, booking rules and calendar subscription on the side.
+ * Student planning (after the client's reference prototype): credit and quota, the referent's
+ * week to send a request, how it works, then every appointment with its status.
  */
 export default function StudentPlanningPage({ searchParams }: PageProps<"/eleve/planning">) {
   return (
     <>
       <PageHeader
-        title="Mon planning"
-        description="Vos leçons à venir et passées."
+        eyebrow="Mon planning"
+        title="Votre prochaine leçon commence ici."
+        description="Choisissez votre créneau, puis suivez la confirmation de votre moniteur."
         actions={
-          <ButtonLink href="/eleve/planning/reserver" size="lg" icon={<CalendarPlus className="size-5" aria-hidden />}>
-            Réserver une leçon
-          </ButtonLink>
+          <Suspense fallback={<Skeleton className="h-15 w-52 rounded-2xl" />}>
+            <SecretariatPill />
+          </Suspense>
         }
       />
 
       <Suspense fallback={null}>
-        <BookingConfirmationSection searchParams={searchParams} />
+        <RequestConfirmation searchParams={searchParams} />
       </Suspense>
 
-      <PlanningFeedbackProvider>
-        {/* 2/1 split from `xl` only: next to the sidebar, a third of the content is too narrow at `lg`. */}
-        <div className="grid gap-6 xl:grid-cols-3 xl:gap-8">
-          <section aria-label="Mes leçons" className="min-w-0 xl:col-span-2">
-            <PlanningFeedbackRegion />
-            <Suspense fallback={<LessonsPanelSkeleton />}>
-              <LessonsPanel searchParams={searchParams} />
-            </Suspense>
-          </section>
+      <div className="space-y-6">
+        <Suspense fallback={<PlanningStatsSkeleton />}>
+          <Stats searchParams={searchParams} />
+        </Suspense>
 
-          <div className="grid min-w-0 content-start gap-6 md:grid-cols-2 md:items-start xl:grid-cols-1">
-            <Card>
-              <BookingRulesHeader />
-              <Suspense fallback={<BookingRulesSkeleton />}>
-                <BookingRulesBody />
-              </Suspense>
-            </Card>
+        {/* 2/1 split from `xl` only: next to the sidebar, the 6-day grid needs the width at `lg`. */}
+        <div className="grid gap-6 xl:grid-cols-3">
+          <div className="min-w-0 xl:col-span-2">
+            <Suspense fallback={<BookingCardSkeleton />}>
+              <Booking searchParams={searchParams} />
+            </Suspense>
+          </div>
+          <div className="min-w-0 space-y-6">
+            <Suspense fallback={<HowItWorksSkeleton />}>
+              <HowItWorks />
+            </Suspense>
             <Card>
               <CalendarFeedHeader />
               <Suspense fallback={<CalendarFeedSkeleton />}>
@@ -74,7 +103,14 @@ export default function StudentPlanningPage({ searchParams }: PageProps<"/eleve/
             </Card>
           </div>
         </div>
-      </PlanningFeedbackProvider>
+
+        <PlanningFeedbackProvider>
+          <PlanningFeedbackRegion />
+          <Suspense fallback={<AppointmentsSkeleton />}>
+            <MyAppointments searchParams={searchParams} />
+          </Suspense>
+        </PlanningFeedbackProvider>
+      </div>
     </>
   );
 }

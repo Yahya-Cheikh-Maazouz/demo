@@ -2,7 +2,7 @@
 
 import { refresh } from "next/cache";
 import { unstable_rethrow } from "next/navigation";
-import { createLesson, moveLesson, setLessonStatus } from "@/lib/api/gestion";
+import { createLesson, moveLesson, reviewLessonRequest, setLessonStatus } from "@/lib/api/gestion";
 import { formatDateLong, formatHours, formatTime } from "@/lib/format";
 import { parisDateTime } from "@/lib/paris-time";
 import type { ActionResult, LessonType } from "@/lib/types";
@@ -125,11 +125,25 @@ export async function lessonStatusAction(prev: AgendaActionState, formData: Form
   const attempt = (prev.attempt ?? 0) + 1;
   const lessonId = read(formData, "lessonId");
   const status = read(formData, "status");
-  if (!ID.test(lessonId) || !["effectue", "annule", "absent"].includes(status)) {
+  if (!ID.test(lessonId) || !["effectue", "annule", "absent", "accepte", "refuse"].includes(status)) {
     return { status: "error", code: "invalide", message: "Action impossible sur ce RDV.", attempt };
   }
 
   try {
+    // A student's request: confirm it (as the instructor would) or refuse it.
+    if (status === "accepte" || status === "refuse") {
+      const result = await reviewLessonRequest(lessonId, status);
+      if (!result.ok) return failure(result, attempt);
+      refresh();
+      const message =
+        status === "refuse"
+          ? "Demande refusée. Le créneau est libéré et l'élève prévenu."
+          : result.data.lesson.status === "attente_paiement"
+            ? "Demande confirmée. Le solde de l'élève ne la couvre pas : elle attend son paiement."
+            : "Demande confirmée. L'élève est prévenu.";
+      return { status: "success", message, attempt };
+    }
+
     const result = await setLessonStatus(lessonId, status === "effectue" ? "effectue" : "annule", {
       noShow: status === "absent",
     });

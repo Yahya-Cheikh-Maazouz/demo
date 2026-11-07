@@ -6,13 +6,16 @@
 // "accès refusé" state); mutations return { ok: false, code: "interdit" }.
 // All functions read the session (cookies): render their callers inside <Suspense>.
 
+import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import * as imports from "@/lib/mock/imports";
+import * as platform from "@/lib/mock/platform";
 import * as settings from "@/lib/mock/settings";
 import * as store from "@/lib/mock/store";
 import * as studentsAdmin from "@/lib/mock/students-admin";
 import { can } from "@/lib/permissions";
 import { requireStaff } from "@/lib/session";
+import { subscriptionBlock } from "./subscription-status";
 import type {
   ActionResult,
   AuditEntry,
@@ -41,6 +44,8 @@ import type {
   StudentProfile,
   StudentRow,
   Subscription,
+  SubscriptionOverview,
+  SubscriptionStatus,
   TeamMember,
   TeamMemberInput,
   User,
@@ -81,6 +86,8 @@ async function context() {
 
 async function readContext(permission: Permission) {
   const ctx = await context();
+  // Suspended school: only the gérant still signs in, and only to settle the subscription.
+  if (store.readSubscriptionStatus(ctx.tenant, ctx.now) === "suspendu") redirect("/gestion/abonnement");
   if (!can(ctx.user, permission)) throw new Error(FORBIDDEN[permission]);
   return ctx;
 }
@@ -135,6 +142,8 @@ export async function createLesson(
   const { user, tenant, now } = await context();
   if (!can(user, "planning.gerer")) return forbidden("planning.gerer");
   if (options.force && !can(user, "planning.forcer")) return forbidden("planning.forcer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeCreateLesson(tenant, input, now, options);
 }
@@ -147,6 +156,8 @@ export async function moveLesson(
   const { user, tenant, now } = await context();
   if (!can(user, "planning.gerer")) return forbidden("planning.gerer");
   if (options.force && !can(user, "planning.forcer")) return forbidden("planning.forcer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeMoveLesson(tenant, lessonId, move, now, options);
 }
@@ -159,8 +170,20 @@ export async function setLessonStatus(
 ): Promise<ActionResult<{ chargedHours: number }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "planning.gerer")) return forbidden("planning.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeLessonStatus(tenant, lessonId, status, now, options);
+}
+
+/** Confirms ("accepte") or refuses a student's lesson request. */
+export async function reviewLessonRequest(lessonId: string, decision: "accepte" | "refuse"): Promise<ActionResult<{ lesson: Lesson }>> {
+  const { user, tenant, now } = await context();
+  if (!can(user, "planning.gerer")) return forbidden("planning.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
+  await settle();
+  return store.writeReviewLessonRequest(tenant, lessonId, decision, now);
 }
 
 export async function reviewDocument(
@@ -171,6 +194,8 @@ export async function reviewDocument(
 ): Promise<ActionResult<{ document: RequiredDocument }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "documents.valider")) return forbidden("documents.valider");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeReviewDocument(tenant, studentId, documentId, decision, reason, now);
 }
@@ -178,6 +203,8 @@ export async function reviewDocument(
 export async function setStudentArchived(studentId: string, archived: boolean): Promise<ActionResult> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeArchiveStudent(tenant, studentId, archived, now);
 }
@@ -192,6 +219,8 @@ export async function recordCashEntry(input: {
 }): Promise<ActionResult<{ entry: CashEntry }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "caisse.encaisser")) return forbidden("caisse.encaisser");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeCashEntry(tenant, user, input, now);
 }
@@ -199,6 +228,8 @@ export async function recordCashEntry(input: {
 export async function reviewCashEntry(entryId: string, decision: "valide" | "refuse"): Promise<ActionResult<{ entry: CashEntry }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "caisse.valider")) return forbidden("caisse.valider");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return store.writeReviewCashEntry(tenant, user, entryId, decision, now);
 }
@@ -228,6 +259,8 @@ export async function getStudentFormOptions(): Promise<StudentFormOptions> {
 export async function createStudent(input: NewStudentInput): Promise<ActionResult<{ studentId: string }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return studentsAdmin.writeCreateStudent(tenant, user, input, now);
 }
@@ -239,6 +272,8 @@ export async function updateStudent(
 ): Promise<ActionResult<{ profile: StudentProfile }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return studentsAdmin.writeUpdateStudent(tenant, user, studentId, patch, now);
 }
@@ -278,6 +313,8 @@ export async function uploadImport(file: {
 }): Promise<ActionResult<{ session: ImportSession }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return imports.writeUploadImport(tenant, user, file, now);
 }
@@ -286,6 +323,8 @@ export async function uploadImport(file: {
 export async function mapImportColumns(importId: string, mapping: ImportMapping): Promise<ActionResult<{ session: ImportSession }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return imports.writeMapImport(tenant, user, importId, mapping, now);
 }
@@ -297,6 +336,8 @@ export async function updateImportRow(
 ): Promise<ActionResult<{ row: ImportRow }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return imports.writeUpdateImportRow(tenant, user, importId, line, values, now);
 }
@@ -304,6 +345,8 @@ export async function updateImportRow(
 export async function commitImport(importId: string): Promise<ActionResult<{ session: ImportSession }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return imports.writeCommitImport(tenant, user, importId, now);
 }
@@ -312,6 +355,8 @@ export async function commitImport(importId: string): Promise<ActionResult<{ ses
 export async function undoImport(importId: string): Promise<ActionResult<{ session: ImportSession }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return imports.writeUndoImport(tenant, user, importId, now);
 }
@@ -319,6 +364,8 @@ export async function undoImport(importId: string): Promise<ActionResult<{ sessi
 export async function discardImport(importId: string): Promise<ActionResult> {
   const { user, tenant, now } = await context();
   if (!can(user, "eleves.gerer")) return forbidden("eleves.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return imports.writeDiscardImport(tenant, user, importId, now);
 }
@@ -334,6 +381,8 @@ export async function getPricing(): Promise<PricingSettings> {
 export async function updateRates(input: { hourlyRate: number; registrationFee: number }): Promise<ActionResult<{ pricing: PricingSettings }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "tarifs.gerer")) return forbidden("tarifs.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeRates(tenant, user, input, now);
 }
@@ -342,6 +391,8 @@ export async function updateRates(input: { hourlyRate: number; registrationFee: 
 export async function savePackageOffer(input: PackageOfferInput): Promise<ActionResult<{ offer: PackageOffer }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "tarifs.gerer")) return forbidden("tarifs.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writePackageOffer(tenant, user, input, now);
 }
@@ -350,6 +401,8 @@ export async function savePackageOffer(input: PackageOfferInput): Promise<Action
 export async function setPackageOfferActive(offerId: string, active: boolean): Promise<ActionResult<{ offer: PackageOffer }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "tarifs.gerer")) return forbidden("tarifs.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writePackageOfferActive(tenant, user, offerId, active, now);
 }
@@ -357,6 +410,8 @@ export async function setPackageOfferActive(offerId: string, active: boolean): P
 export async function saveHourPack(input: HourPackInput): Promise<ActionResult<{ pack: HourPack }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "tarifs.gerer")) return forbidden("tarifs.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeHourPack(tenant, user, input, now);
 }
@@ -364,6 +419,8 @@ export async function saveHourPack(input: HourPackInput): Promise<ActionResult<{
 export async function deleteHourPack(packId: string): Promise<ActionResult> {
   const { user, tenant, now } = await context();
   if (!can(user, "tarifs.gerer")) return forbidden("tarifs.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeDeleteHourPack(tenant, user, packId, now);
 }
@@ -376,6 +433,8 @@ export async function getRules(): Promise<SchoolRules> {
 export async function updateRules(rules: SchoolRules): Promise<ActionResult<{ rules: SchoolRules }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "regles.gerer")) return forbidden("regles.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeRules(tenant, user, rules, now);
 }
@@ -408,6 +467,8 @@ export async function getTeam(): Promise<TeamMember[]> {
 export async function inviteTeamMember(input: TeamMemberInput): Promise<ActionResult<{ member: TeamMember }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "equipe.gerer")) return forbidden("equipe.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeInviteMember(tenant, user, input, now);
 }
@@ -419,6 +480,8 @@ export async function updateMemberAccess(
 ): Promise<ActionResult<{ member: TeamMember }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "equipe.gerer")) return forbidden("equipe.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeMemberAccess(tenant, user, memberId, access, now);
 }
@@ -426,6 +489,8 @@ export async function updateMemberAccess(
 export async function setMemberStatus(memberId: string, status: "actif" | "desactive"): Promise<ActionResult<{ member: TeamMember }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "equipe.gerer")) return forbidden("equipe.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeMemberStatus(tenant, user, memberId, status, now);
 }
@@ -433,6 +498,8 @@ export async function setMemberStatus(memberId: string, status: "actif" | "desac
 export async function resendInvitation(memberId: string): Promise<ActionResult> {
   const { user, tenant, now } = await context();
   if (!can(user, "equipe.gerer")) return forbidden("equipe.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeResendInvitation(tenant, user, memberId, now);
 }
@@ -449,6 +516,30 @@ export async function getSubscription(): Promise<Subscription> {
 export async function changePlan(planId: string): Promise<ActionResult<{ subscription: Subscription }>> {
   const { user, tenant, now } = await context();
   if (!can(user, "abonnement.gerer")) return forbidden("abonnement.gerer");
+  const blocked = subscriptionBlock(tenant, now);
+  if (blocked) return blocked;
   await settle();
   return settings.writeChangePlan(tenant, user, planId, now);
+}
+
+/**
+ * Plan, status (with the grace period and trial dates) and quota usage, for /gestion/abonnement.
+ * Readable even while the school is suspended: it is the page where the gérant settles it.
+ */
+export async function getSubscriptionOverview(): Promise<SubscriptionOverview> {
+  const { user, tenant, now } = await context();
+  if (!can(user, "abonnement.gerer")) throw new Error(FORBIDDEN["abonnement.gerer"]);
+  return platform.readSubscriptionOverview(tenant, now);
+}
+
+/**
+ * "Mettre à jour le moyen de paiement" of an unpaid, read-only or suspended school. Mock of Stripe:
+ * the new card is charged at once and the subscription is active again. Not subject to
+ * subscriptionBlock (it is the way out). Code "rien_a_regulariser" when nothing is unpaid.
+ */
+export async function regularizeSubscription(): Promise<ActionResult<{ status: SubscriptionStatus }>> {
+  const { user, tenant, now } = await context();
+  if (!can(user, "abonnement.gerer")) return forbidden("abonnement.gerer");
+  await settle();
+  return platform.writeRegularize(user, tenant, now);
 }

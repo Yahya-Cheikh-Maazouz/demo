@@ -18,7 +18,16 @@ export function BalanceStateBadge({ state }: { state: Balance["state"] }) {
  * ("Heures du forfait · Payées · Consommées · Disponibles · Réservées · À couvrir").
  * The bar is decorative; the figures below carry the information.
  */
-export function BalanceSummary({ balance, className }: { balance: Balance; className?: string }) {
+export function BalanceSummary({
+  balance,
+  className,
+  headline = "Heures restantes après vos réservations",
+}: {
+  balance: Balance;
+  className?: string;
+  /** Label of the main figure; the default speaks to the student. */
+  headline?: string;
+}) {
   const meta = BALANCE_STATE_META[balance.state];
   const scale = Math.max(balance.packageHours, balance.consumedHours + balance.reservedHours, balance.paidHours);
   const pct = (hours: number) => `${Math.max(0, (hours / scale) * 100)}%`;
@@ -37,7 +46,7 @@ export function BalanceSummary({ balance, className }: { balance: Balance; class
     <div className={cn("space-y-4", className)}>
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <p className="text-sm font-medium text-ink-muted">Heures restantes après vos réservations</p>
+          <p className="text-sm font-medium text-ink-muted">{headline}</p>
           <p
             className={cn(
               "text-4xl font-bold tracking-tight tabular-nums",

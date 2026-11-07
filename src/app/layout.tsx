@@ -1,11 +1,12 @@
 import type { Metadata, Viewport } from "next";
-import { Plus_Jakarta_Sans } from "next/font/google";
+import { Archivo } from "next/font/google";
 import { Suspense } from "react";
 import { TenantTheme } from "@/components/tenant-theme";
 import "./globals.css";
 
-const jakarta = Plus_Jakarta_Sans({
-  variable: "--font-jakarta",
+// Typeface of the client's reference prototype (meeting of 1 Nov 2026).
+const archivo = Archivo({
+  variable: "--font-archivo",
   subsets: ["latin"],
   display: "swap",
 });
@@ -19,12 +20,12 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
-  themeColor: "#f6f7f9",
+  themeColor: "#f3f7f6",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="fr" className={`${jakarta.variable} h-full antialiased`}>
+    <html lang="fr" className={`${archivo.variable} h-full antialiased`}>
       <body className="min-h-dvh">
         <Suspense fallback={null}>
           <TenantTheme />

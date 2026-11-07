@@ -8,11 +8,13 @@ type TenantBrandProps = {
   subtitle?: string;
   href?: string;
   size?: "md" | "lg";
+  /** "dark": white text, for the dark sidebar. */
+  tone?: "light" | "dark";
   className?: string;
 };
 
 /** Logo square + name of the current auto-école. Render inside <Suspense>. */
-export async function TenantBrand({ subtitle, href, size = "md", className }: TenantBrandProps) {
+export async function TenantBrand({ subtitle, href, size = "md", tone = "light", className }: TenantBrandProps) {
   const tenant = await getTenant();
   if (!tenant) return null;
 
@@ -28,17 +30,27 @@ export async function TenantBrand({ subtitle, href, size = "md", className }: Te
         {tenant.logoInitials}
       </span>
       <span className="min-w-0 text-left">
-        <span className={cn("block truncate font-bold text-ink", size === "lg" ? "text-lg" : "text-sm")}>
+        <span
+          className={cn(
+            "block truncate font-bold",
+            tone === "dark" ? "text-white" : "text-ink",
+            size === "lg" ? "text-lg" : "text-sm",
+          )}
+        >
           {tenant.name}
         </span>
-        {subtitle && <span className="block truncate text-xs font-medium text-ink-subtle">{subtitle}</span>}
+        {subtitle && (
+          <span className={cn("block truncate text-xs font-medium", tone === "dark" ? "text-white/60" : "text-ink-subtle")}>
+            {subtitle}
+          </span>
+        )}
       </span>
     </>
   );
 
   const classes = cn("flex min-w-0 items-center gap-3", className);
   return href ? (
-    <Link href={href} className={cn(classes, "rounded-lg")}>
+    <Link href={href} className={cn(classes, "rounded-lg", tone === "dark" && "focus-visible:outline-brand-bright")}>
       {content}
     </Link>
   ) : (

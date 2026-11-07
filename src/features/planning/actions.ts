@@ -2,7 +2,7 @@
 
 import { refresh } from "next/cache";
 import { redirect, unstable_rethrow } from "next/navigation";
-import { bookSlot, cancelLesson } from "@/lib/api/eleve";
+import { cancelLesson, confirmReady, requestLesson } from "@/lib/api/eleve";
 import { formatHours } from "@/lib/format";
 import type { PlanningActionState } from "./action-state";
 
@@ -37,11 +37,12 @@ export async function cancelLessonAction(
   if (!result.ok) return { status: "error", code: result.code, message: result.error, attempt };
 
   refresh();
-  const { late, chargedHours } = result.data;
+  const { late, chargedHours, request } = result.data;
   return {
     status: "success",
-    message:
-      chargedHours > 0
+    message: request
+      ? "Demande annulée. Le créneau est libéré."
+      : chargedHours > 0
         ? `Leçon annulée. Annulation tardive : ${formatHours(chargedHours)} ${chargedHours > 1 ? "ont été décomptées" : "a été décomptée"} de votre solde.`
         : late
           ? "Leçon annulée. Aucune heure n'a été décomptée de votre solde."
@@ -50,40 +51,57 @@ export async function cancelLessonAction(
   };
 }
 
+const DURATIONS = new Set([1, 1.5, 2]);
+const WEEK_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
- * Books a free slot, then goes back to the planning with a confirmation banner.
- * `acceptPendingPayment=1` sends the booking even if the balance does not cover it
- * (the lesson is then "en attente de paiement").
+ * Sends a lesson request to the referent instructor, then goes back to the planning with a
+ * confirmation banner. `acceptPendingPayment=1` sends it even if the credit does not cover it.
  */
-export async function bookSlotAction(prev: PlanningActionState, formData: FormData): Promise<PlanningActionState> {
+export async function requestLessonAction(prev: PlanningActionState, formData: FormData): Promise<PlanningActionState> {
   const attempt = (prev.attempt ?? 0) + 1;
-  const slotId = readText(formData, "slotId");
+  const type = readText(formData, "type");
+  const start = readText(formData, "start");
+  const duration = Number(readText(formData, "duration"));
+  const weekStart = readText(formData, "weekStart");
   const acceptPendingPayment = readText(formData, "acceptPendingPayment") === "1";
-  if (!ID_PATTERN.test(slotId)) {
-    return {
-      status: "error",
-      code: "creneau_indisponible",
-      message: "Ce créneau n'est plus disponible. Choisissez-en un autre.",
-      attempt,
-    };
+  if ((type !== "conduite" && type !== "code") || Number.isNaN(Date.parse(start)) || !DURATIONS.has(duration)) {
+    return { status: "error", code: "invalide", message: "Choisissez un créneau et une durée dans l'agenda.", attempt };
   }
 
-  let result: Awaited<ReturnType<typeof bookSlot>>;
+  let result: Awaited<ReturnType<typeof requestLesson>>;
   try {
-    result = await bookSlot(slotId, { acceptPendingPayment });
+    result = await requestLesson({ type, start, durationHours: duration }, { acceptPendingPayment });
   } catch (error) {
     unstable_rethrow(error);
     return { status: "error", code: "reseau", message: NETWORK_ERROR, attempt };
   }
 
   if (!result.ok) {
-    // The free slots changed under the student's feet: re-render the list with fresh data.
+    // The agenda changed under the student's feet: re-render the grid with fresh data.
     if (result.code === "creneau_indisponible") refresh();
     return { status: "error", code: result.code, message: result.error, attempt };
   }
 
-  const { lesson } = result.data;
-  const params = new URLSearchParams({ reservee: "1", lecon: lesson.id });
-  if (lesson.status === "attente_paiement") params.set("attente", "1");
-  redirect(`/eleve/planning?${params.toString()}`);
+  const params = new URLSearchParams({ demande: result.data.lesson.id, type });
+  if (WEEK_PATTERN.test(weekStart)) params.set("semaine", weekStart);
+  redirect(`/eleve/planning?${params.toString()}#mes-rendez-vous`);
+}
+
+/** "Je suis prêt(e)": tells the instructor the student will be there. */
+export async function readyForLessonAction(prev: PlanningActionState, formData: FormData): Promise<PlanningActionState> {
+  const attempt = (prev.attempt ?? 0) + 1;
+  const lessonId = readText(formData, "lessonId");
+  if (!ID_PATTERN.test(lessonId)) {
+    return { status: "error", code: "introuvable", message: "Cette leçon est introuvable.", attempt };
+  }
+  try {
+    const result = await confirmReady(lessonId);
+    if (!result.ok) return { status: "error", code: result.code, message: result.error, attempt };
+  } catch (error) {
+    unstable_rethrow(error);
+    return { status: "error", code: "reseau", message: NETWORK_ERROR, attempt };
+  }
+  refresh();
+  return { status: "success", message: "C'est noté : votre moniteur sait que vous serez là.", attempt };
 }
