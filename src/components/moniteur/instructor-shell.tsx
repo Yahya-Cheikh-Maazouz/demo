@@ -24,11 +24,16 @@ async function TabBar() {
   return <InstructorTabBar pending={pending} menu={<MoreMenu pending={pending} agencyPhone={tenant?.phone ?? null} />} />;
 }
 
-/** Instructor's name and today's date, at the top right. */
+/**
+ * Instructor's name and today's date, at the top right. Also renders the session marker the
+ * service worker looks for before keeping a copy of the page (public/moniteur/sw.js): it is only
+ * there once the instructor's session has been checked.
+ */
 async function Identity() {
   const [user, now] = await Promise.all([getInstructorUser(), getNow()]);
   return (
     <div className="flex min-w-0 items-center gap-2.5">
+      <span hidden data-moniteur-session={user.id} />
       <span className="min-w-0 text-right">
         <span className="block truncate text-sm font-bold text-ink">
           {user.firstName} {user.lastName}
@@ -68,6 +73,7 @@ async function SidebarUser() {
       </div>
       <LogoutButton
         label="Se déconnecter"
+        tone="dark"
         className="flex size-11 items-center justify-center rounded-xl text-white/60 hover:bg-white/10 hover:text-white focus-visible:outline-brand-bright"
       >
         <LogOut className="size-5" aria-hidden />

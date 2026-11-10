@@ -22,11 +22,14 @@ export function BalanceSummary({
   balance,
   className,
   headline = "Heures restantes après vos réservations",
+  message,
 }: {
   balance: Balance;
   className?: string;
   /** Label of the main figure; the default speaks to the student. */
   headline?: string;
+  /** Explanation of a state other than "ok"; the default speaks to the student. */
+  message?: string;
 }) {
   const meta = BALANCE_STATE_META[balance.state];
   const scale = Math.max(balance.packageHours, balance.consumedHours + balance.reservedHours, balance.paidHours);
@@ -101,7 +104,7 @@ export function BalanceSummary({
         ))}
       </dl>
 
-      {balance.state !== "ok" && <p className="text-sm text-ink-muted">{meta.message(balance)}</p>}
+      {balance.state !== "ok" && <p className="text-sm text-ink-muted">{message ?? meta.message(balance)}</p>}
     </div>
   );
 }

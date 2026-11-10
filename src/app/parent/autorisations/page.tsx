@@ -7,6 +7,7 @@ import {
   AuthorisationsContentSkeleton,
   AuthorisationsTitle,
 } from "@/features/parent/authorisations";
+import { ChildPageDescription } from "@/features/parent/child-not-found";
 import { childParam } from "@/features/parent/query";
 
 export const metadata: Metadata = {
@@ -14,6 +15,13 @@ export const metadata: Metadata = {
 };
 
 type SearchParams = PageProps<"/parent/autorisations">["searchParams"];
+
+const DESCRIPTION = "Validations et autorisations données en tant que représentant légal.";
+
+/** The description, or why the child cannot be shown. */
+async function Description({ searchParams }: { searchParams: SearchParams }) {
+  return <ChildPageDescription child={childParam(await searchParams)} text={DESCRIPTION} />;
+}
 
 async function Title({ searchParams }: { searchParams: SearchParams }) {
   return <AuthorisationsTitle child={childParam(await searchParams)} />;
@@ -34,7 +42,11 @@ export default function ParentAuthorisationsPage({ searchParams }: PageProps<"/p
             <Title searchParams={searchParams} />
           </Suspense>
         }
-        description="Validations et autorisations données en tant que représentant légal."
+        description={
+          <Suspense fallback={DESCRIPTION}>
+            <Description searchParams={searchParams} />
+          </Suspense>
+        }
       />
       <Suspense fallback={<AuthorisationsContentSkeleton />}>
         <Content searchParams={searchParams} />

@@ -8,7 +8,7 @@ import { LESSON_TYPE_META } from "@/features/planning/lesson-meta";
 import { getInstructorRequests } from "@/lib/api/moniteur";
 import { formatDateLong, formatHours, formatRelativeDay, formatTimeRange } from "@/lib/format";
 import type { InstructorLesson } from "@/lib/types";
-import { telHref } from "./lesson-card";
+import { GuardianContactNote, callTarget, telHref } from "./lesson-card";
 import { RequestReview } from "./request-review";
 
 function RequestCard({ lesson, now }: { lesson: InstructorLesson; now: string }) {
@@ -17,6 +17,7 @@ function RequestCard({ lesson, now }: { lesson: InstructorLesson; now: string })
   const relative = formatRelativeDay(lesson.start, now);
   const date = formatDateLong(lesson.start);
   const titleId = `demande-${lesson.id}`;
+  const call = callTarget(lesson.student);
   return (
     <article aria-labelledby={titleId} className="rounded-3xl border border-line/80 bg-surface p-4 shadow-card sm:p-5">
       <p className="flex items-center gap-2 text-sm font-semibold text-brand">
@@ -36,14 +37,24 @@ function RequestCard({ lesson, now }: { lesson: InstructorLesson; now: string })
             {name}
           </Link>
         </h2>
-        {lesson.student.phone && (
-          <a href={telHref(lesson.student.phone)} className={buttonStyles({ variant: "ghost", className: "h-12 shrink-0 rounded-2xl text-brand" })}>
+        {call && !call.guardianName && (
+          <a href={telHref(call.phone)} className={buttonStyles({ variant: "ghost", className: "h-12 shrink-0 rounded-2xl text-brand" })}>
             <Phone className="size-5" aria-hidden />
             Appeler
             <span className="sr-only"> {name}</span>
           </a>
         )}
       </div>
+      {call?.guardianName && (
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3">
+          <GuardianContactNote student={lesson.student} />
+          <a href={telHref(call.phone)} className={buttonStyles({ variant: "ghost", className: "-ml-3 h-12 rounded-2xl text-brand" })}>
+            <Phone className="size-5" aria-hidden />
+            Appeler le représentant légal
+            <span className="sr-only">, {call.guardianName}, pour {name}</span>
+          </a>
+        </div>
+      )}
       <RequestReview
         className="mt-4"
         lessonId={lesson.id}

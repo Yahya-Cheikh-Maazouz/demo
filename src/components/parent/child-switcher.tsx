@@ -130,7 +130,7 @@ export function FollowedChildCard({
           <p className="truncate text-sm font-semibold text-white">
             {child ? `${child.firstName} ${child.lastName}` : "Aucun dossier choisi"}
           </p>
-          <p className="truncate text-xs text-white/65">{child ? describe(child) : "Choisissez un enfant"}</p>
+          <p className="line-clamp-2 text-xs text-white/65">{child ? describe(child) : "Choisissez un enfant"}</p>
         </div>
       </div>
       {onSwitch && (

@@ -4,7 +4,8 @@
 import type { LeaveConflict } from "@/lib/types";
 
 export type InstructorActionState = {
-  status: "idle" | "success" | "error";
+  /** "info": nothing was done and nothing went wrong (e.g. a livret saved without any change). */
+  status: "idle" | "success" | "info" | "error";
   /** API error code, e.g. "deja_traitee", "pas_commence", "lecture_seule". */
   code?: string;
   /** Ready-to-display message (success or error). */

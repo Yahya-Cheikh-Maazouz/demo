@@ -13,6 +13,7 @@ import {
   MapPin,
   MessageSquareQuote,
   Phone,
+  ShieldUser,
   UserCheck,
   UserX,
 } from "lucide-react";
@@ -30,7 +31,8 @@ import { formatDateLong, formatHours, formatPercent, formatRelativeDay, formatTi
 import type { InstructorLesson, InstructorLessonDetail } from "@/lib/types";
 import { AbsentButton } from "./absent-button";
 import { InstructorFeedbackProvider, InstructorFeedbackRegion } from "./feedback";
-import { bigButton, telHref } from "./lesson-card";
+import { deName, guillemets } from "./french";
+import { bigButton, callTarget, telHref } from "./lesson-card";
 import { LessonLightIndicator } from "./lesson-light";
 import { TO_SIGN_META, dayHref, instructorStatusMeta, isToSign } from "./lesson-status";
 import { LivretEditor } from "./livret-editor";
@@ -69,7 +71,7 @@ function ActionsCard({ detail }: { detail: InstructorLessonDetail }) {
         <CardHeader
           icon={<Hourglass className="size-5" aria-hidden />}
           title="Demande de l'élève"
-          description={past ? undefined : "L'élève attend votre réponse. Une fois confirmée, il la voit « Planifié »."}
+          description={past ? undefined : `L'élève attend votre réponse. Une fois confirmée, il la voit ${guillemets("Planifié")}.`}
         />
         <CardBody>
           {past ? (
@@ -141,6 +143,15 @@ function ActionsCard({ detail }: { detail: InstructorLessonDetail }) {
   );
 }
 
+/** Why the livret can or cannot be filled on this lesson. */
+function livretDescription(lesson: InstructorLesson, editable: boolean): string {
+  if (editable) return "Ajustez les compétences REMC et laissez un retour après la leçon.";
+  if (lesson.status === "a_confirmer") return "Le livret se remplit une fois la leçon confirmée.";
+  return lesson.noShow
+    ? "Élève absent : le livret ne se remplit pas sur cette leçon."
+    : "Leçon annulée : le livret ne se remplit pas sur cette leçon.";
+}
+
 /** Livret REMC: editable for a confirmed or done lesson, otherwise the levels only. */
 function LivretCard({ detail }: { detail: InstructorLessonDetail }) {
   const { lesson, livret } = detail;
@@ -149,14 +160,7 @@ function LivretCard({ detail }: { detail: InstructorLessonDetail }) {
   const latest = livret.feedback[0];
   return (
     <Card>
-      <CardHeader
-        title="Livret de l'élève"
-        description={
-          editable
-            ? "Ajustez les compétences REMC et laissez un retour après la leçon."
-            : "Le livret se remplit une fois la leçon confirmée."
-        }
-      />
+      <CardHeader title="Livret de l'élève" description={livretDescription(lesson, editable)} />
       <CardBody className="space-y-5">
         {editable ? (
           <LivretEditor
@@ -177,7 +181,7 @@ function LivretCard({ detail }: { detail: InstructorLessonDetail }) {
         )}
         {latest && (
           <figure className="rounded-2xl bg-subtle p-4">
-            <figcaption className="flex items-center gap-2 text-xs font-semibold text-ink-subtle">
+            <figcaption className="flex items-center gap-2 text-xs font-semibold text-ink-muted">
               <MessageSquareQuote className="size-4 text-brand" aria-hidden />
               Dernier retour · {latest.author}, {formatDateLong(latest.at).toLowerCase()}
             </figcaption>
@@ -201,6 +205,8 @@ export async function LessonDetail({ id }: { id: Promise<string> }) {
   const name = `${lesson.student.firstName} ${lesson.student.lastName}`;
   const today = dayKey(now);
   const day = dayKey(lesson.start);
+  const { student } = lesson;
+  const call = callTarget(student);
 
   return (
     <InstructorFeedbackProvider>
@@ -243,27 +249,49 @@ export async function LessonDetail({ id }: { id: Promise<string> }) {
         <ActionsCard detail={detail} />
 
         <Card>
-          <CardHeader title={name} description={lesson.student.licence} />
+          <CardHeader title={name} description={student.licence} />
           <CardBody className="space-y-3">
-            {lesson.student.phone && (
-              <a href={telHref(lesson.student.phone)} className={buttonStyles({ size: "lg", fullWidth: true, className: bigButton })}>
+            {call && (
+              <a href={telHref(call.phone)} className={buttonStyles({ size: "lg", fullWidth: true, className: bigButton })}>
                 <Phone className="size-5" aria-hidden />
-                Appeler {lesson.student.firstName}
+                {call.guardianName ? "Appeler le représentant légal" : `Appeler ${student.firstName}`}
+                {call.guardianName && <span className="sr-only">, {call.guardianName}</span>}
               </a>
             )}
+            {student.isMinor && !student.phone && (
+              <p className="flex items-start gap-2 rounded-2xl bg-subtle p-3 text-sm text-ink-muted">
+                <ShieldUser className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
+                <span>
+                  {student.guardianContact
+                    ? `Son représentant légal n'a pas autorisé le contact direct avec ${student.firstName} : passez par lui pour un retard ou un changement de rendez-vous.`
+                    : `Son représentant légal n'a pas autorisé le contact direct avec ${student.firstName} : passez par l'accueil.`}
+                </span>
+              </p>
+            )}
             <dl className="divide-y divide-line">
-              {lesson.student.phone && (
+              {student.phone && (
                 <Row icon={Phone} label="Téléphone">
                   <RevealValue
-                    value={lesson.student.phone}
-                    masked={maskPhone(lesson.student.phone)}
-                    maskedLabel={`masqué, se termine par ${lesson.student.phone.slice(-2)}`}
+                    value={student.phone}
+                    masked={maskPhone(student.phone)}
+                    maskedLabel={`masqué, se termine par ${student.phone.slice(-2)}`}
                     noun="le téléphone"
                   />
                 </Row>
               )}
+              {student.guardianContact && (
+                <Row icon={ShieldUser} label="Représentant légal">
+                  <span className="block font-semibold">{student.guardianContact.name}</span>
+                  <RevealValue
+                    value={student.guardianContact.phone}
+                    masked={maskPhone(student.guardianContact.phone)}
+                    maskedLabel={`masqué, se termine par ${student.guardianContact.phone.slice(-2)}`}
+                    noun={`le téléphone ${deName(student.guardianContact.name)}`}
+                  />
+                </Row>
+              )}
               <Row icon={IdCard} label="NEPH">
-                <NephValue neph={lesson.student.neph} />
+                <NephValue neph={student.neph} />
               </Row>
             </dl>
           </CardBody>

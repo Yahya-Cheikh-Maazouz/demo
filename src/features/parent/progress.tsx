@@ -7,7 +7,7 @@ import { COMPETENCE_STATUS_META } from "@/features/suivi/competence-meta";
 import { ProgressRing } from "@/features/suivi/progress-ring";
 import { formatDate, formatHours, formatPercent } from "@/lib/format";
 import type { Competence, Livret } from "@/lib/types";
-import { ChildNotFound, NOT_FOUND_TITLE } from "./child-not-found";
+import { MissingChild, missingChildTitle } from "./child-not-found";
 import { getPageProgress } from "./data";
 
 /** Small uppercase label on the dark hero (the `eyebrow` utility is brand-colored, for light surfaces). */
@@ -21,13 +21,13 @@ export function parentHeadline(headline: string, firstName: string): string {
 /** "La progression de Léa". Render inside <Suspense>. */
 export async function ProgressTitle({ child }: { child: string | null }) {
   const data = await getPageProgress(child);
-  return <>{data ? `La progression de ${data.child.firstName}` : NOT_FOUND_TITLE}</>;
+  return <>{data ? `La progression de ${data.child.firstName}` : await missingChildTitle()}</>;
 }
 
 /** The child's livret (REMC competences) and the instructors' comments, read-only. Render inside <Suspense>. */
 export async function ProgressContent({ child }: { child: string | null }) {
   const data = await getPageProgress(child);
-  if (!data) return <ChildNotFound />;
+  if (!data) return <MissingChild />;
   const { livret, child: kid } = data;
 
   return (

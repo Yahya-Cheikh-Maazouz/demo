@@ -15,6 +15,7 @@ import { ButtonLink } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { LoadingLabel, Skeleton } from "@/components/ui/skeleton";
 import { DOCUMENT_STATUS_META } from "@/features/documents/document-meta";
+import { INSTALLMENT_STATUS_META } from "@/features/paiements/payment-meta";
 import { LESSON_TYPE_META, studentStatusMeta } from "@/features/planning/lesson-meta";
 import { BalanceStateBadge } from "@/features/solde/balance-summary";
 import { ProgressRing } from "@/features/suivi/progress-ring";
@@ -30,7 +31,7 @@ import {
   formatTime,
 } from "@/lib/format";
 import type { ChildOverview } from "@/lib/types";
-import { ChildNotFound, NOT_FOUND_TITLE } from "./child-not-found";
+import { MissingChild, missingChildTitle } from "./child-not-found";
 import { CONSENT_META, consentStatusMeta } from "./consent-meta";
 import { getPageOverview } from "./data";
 import { parentHeadline } from "./progress";
@@ -39,7 +40,7 @@ import { withChild } from "./query";
 /** "Le parcours de Léa". Render inside <Suspense>. */
 export async function HomeTitle({ child }: { child: string | null }) {
   const overview = await getPageOverview(child);
-  return <>{overview ? `Le parcours de ${overview.child.firstName}` : NOT_FOUND_TITLE}</>;
+  return <>{overview ? `Le parcours de ${overview.child.firstName}` : await missingChildTitle()}</>;
 }
 
 /** Licence of the child, above the title. Render inside <Suspense>. */
@@ -51,7 +52,7 @@ export async function HomeEyebrow({ child }: { child: string | null }) {
 /** Everything the home shows comes from one API call. Render inside <Suspense>. */
 export async function HomeContent({ child }: { child: string | null }) {
   const overview = await getPageOverview(child);
-  if (!overview) return <ChildNotFound />;
+  if (!overview) return <MissingChild />;
   const href = (path: string) => withChild(path, child);
 
   return (
@@ -60,7 +61,7 @@ export async function HomeContent({ child }: { child: string | null }) {
         <NextLesson overview={overview} planningHref={href("/parent/planning")} />
       </section>
 
-      <div className="grid gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <ProgressCard overview={overview} href={href("/parent/progression")} />
         <BalanceCard overview={overview} href={href("/parent/paiements")} />
       </div>
@@ -184,10 +185,13 @@ function NextLesson({ overview, planningHref }: { overview: ChildOverview; plann
 function ProgressCard({ overview, href }: { overview: ChildOverview; href: string }) {
   const { progress, child } = overview;
   return (
-    <Link href={href} className="group block h-full rounded-3xl">
+    <Link href={href} className="group block h-full min-w-0 rounded-3xl">
       <Card className="flex h-full items-center gap-4 p-4 transition-colors group-hover:border-brand/30 sm:p-5">
         <ProgressRing value={progress.overallProgress} className="size-16">
-          <span className="text-sm font-bold text-ink tabular-nums">{formatPercent(progress.overallProgress)}</span>
+          {/* Read once, in the sentence next to the ring. */}
+          <span aria-hidden className="text-sm font-bold text-ink tabular-nums">
+            {formatPercent(progress.overallProgress)}
+          </span>
         </ProgressRing>
         <div className="min-w-0 flex-1">
           <p className="text-sm text-ink-muted">
@@ -206,8 +210,9 @@ function ProgressCard({ overview, href }: { overview: ChildOverview; href: strin
 function BalanceCard({ overview, href }: { overview: ChildOverview; href: string }) {
   const { balance, nextInstallment } = overview;
   const hours = balance.afterReservationsHours;
+  const late = nextInstallment?.status === "en_retard";
   return (
-    <Card className="flex h-full flex-col gap-3 p-4 sm:p-5">
+    <Card className="flex h-full min-w-0 flex-col gap-3 p-4 sm:p-5">
       <div className="flex items-start gap-4">
         <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-brand-soft text-brand">
           <WalletCards className="size-5" aria-hidden />
@@ -223,17 +228,29 @@ function BalanceCard({ overview, href }: { overview: ChildOverview; href: string
         </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t border-line pt-3">
-        <p className="text-sm text-ink-muted">
-          {nextInstallment ? (
-            <>
-              Prochaine échéance :{" "}
-              <span className="font-semibold text-ink tabular-nums">{formatCurrency(nextInstallment.amount, { round: true })}</span>{" "}
-              le <time dateTime={nextInstallment.dueAt}>{formatDate(nextInstallment.dueAt)}</time>
-            </>
-          ) : (
-            "Aucune échéance à venir."
-          )}
-        </p>
+        {nextInstallment && late ? (
+          <div className="min-w-0 space-y-1.5">
+            <Badge tone={INSTALLMENT_STATUS_META.en_retard.tone} icon={INSTALLMENT_STATUS_META.en_retard.icon}>
+              Échéance {INSTALLMENT_STATUS_META.en_retard.label.toLowerCase()}
+            </Badge>
+            <p className="text-sm font-semibold text-danger">
+              <span className="tabular-nums">{formatCurrency(nextInstallment.amount, { round: true })}</span> étaient à
+              régler le <time dateTime={nextInstallment.dueAt}>{formatDate(nextInstallment.dueAt)}</time>
+            </p>
+          </div>
+        ) : (
+          <p className="text-sm text-ink-muted">
+            {nextInstallment ? (
+              <>
+                Prochaine échéance :{" "}
+                <span className="font-semibold text-ink tabular-nums">{formatCurrency(nextInstallment.amount, { round: true })}</span>{" "}
+                le <time dateTime={nextInstallment.dueAt}>{formatDate(nextInstallment.dueAt)}</time>
+              </>
+            ) : (
+              "Aucune échéance à venir."
+            )}
+          </p>
+        )}
         <Link href={href} className="inline-flex h-11 items-center gap-1 rounded-lg px-2 text-sm font-semibold text-brand hover:bg-brand-soft">
           Paiements
           <ChevronRight className="size-4" aria-hidden />

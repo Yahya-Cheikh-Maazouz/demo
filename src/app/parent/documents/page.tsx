@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DocumentsContent, DocumentsContentSkeleton, DocumentsTitle } from "@/features/parent/documents";
+import { ChildPageDescription } from "@/features/parent/child-not-found";
 import { childParam } from "@/features/parent/query";
 
 export const metadata: Metadata = {
@@ -10,6 +11,13 @@ export const metadata: Metadata = {
 };
 
 type SearchParams = PageProps<"/parent/documents">["searchParams"];
+
+const DESCRIPTION = "Où en sont les pièces demandées par l'auto-école.";
+
+/** The description, or why the child cannot be shown. */
+async function Description({ searchParams }: { searchParams: SearchParams }) {
+  return <ChildPageDescription child={childParam(await searchParams)} text={DESCRIPTION} />;
+}
 
 async function Title({ searchParams }: { searchParams: SearchParams }) {
   return <DocumentsTitle child={childParam(await searchParams)} />;
@@ -30,7 +38,11 @@ export default function ParentDocumentsPage({ searchParams }: PageProps<"/parent
             <Title searchParams={searchParams} />
           </Suspense>
         }
-        description="Où en sont les pièces demandées par l'auto-école."
+        description={
+          <Suspense fallback={DESCRIPTION}>
+            <Description searchParams={searchParams} />
+          </Suspense>
+        }
       />
       <Suspense fallback={<DocumentsContentSkeleton />}>
         <Content searchParams={searchParams} />

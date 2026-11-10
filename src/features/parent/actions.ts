@@ -19,6 +19,8 @@ import type { ConsentFormState, ParentPaymentState, ParentPrivacyState, Validati
 const NETWORK_ERROR = "Le serveur n'a pas répondu. Vérifiez votre connexion puis réessayez.";
 const CONSENT_KEYS: ConsentKey[] = ["photos", "contact_telephone", "rgpd", "communications"];
 const METHOD_ERROR = "Choisissez un moyen de paiement : carte bancaire ou Klarna.";
+/** Same wording as the API's "introuvable". */
+const NOT_LINKED = "Cet élève n'est pas rattaché à votre compte.";
 
 function readText(formData: FormData, name: string): string {
   const value = formData.get(name);
@@ -94,6 +96,9 @@ export async function payInstallmentAction(prev: ParentPaymentState, formData: F
   const childId = readText(formData, "childId");
   const installmentId = readText(formData, "installmentId");
   const method = readText(formData, "method");
+  if (!childId || !installmentId) {
+    return { status: "error", message: "Cette échéance n'a pas pu être lue. Rechargez la page puis réessayez.", attempt };
+  }
   if (method !== "carte" && method !== "klarna") {
     return { status: "error", message: METHOD_ERROR, fieldErrors: { method: METHOD_ERROR }, attempt };
   }
@@ -102,11 +107,16 @@ export async function payInstallmentAction(prev: ParentPaymentState, formData: F
   try {
     // Re-read the plan from the API: the amount and the hours never come from the browser.
     const payments = await getChildPayments(childId);
-    const installment = payments?.installments.find((i) => i.id === installmentId);
-    if (!payments || !installment || installment.status === "payee") {
+    if (!payments) return { status: "error", message: NOT_LINKED, attempt };
+    const installment = payments.installments.find((i) => i.id === installmentId);
+    if (!installment || installment.status === "payee") {
+      // Paid meanwhile (another tab, the agency): show the current plan.
+      refresh();
       return { status: "error", message: "Cette échéance est déjà réglée.", attempt };
     }
     result = await payChildInstallment(childId, installment.id, method);
+    // Paid meanwhile, or an older one is due first: the plan on screen is out of date.
+    if (!result.ok && (result.code === "deja_reglee" || result.code === "ordre")) refresh();
   } catch (error) {
     unstable_rethrow(error);
     return { status: "error", message: NETWORK_ERROR, attempt };

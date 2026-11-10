@@ -10,7 +10,9 @@ import { useOnline } from "@/components/moniteur/use-online";
 import { INITIAL_INSTRUCTOR_STATE, type InstructorActionState } from "./action-state";
 import { markAbsentAction } from "./actions";
 import { useInstructorFeedback } from "./feedback";
+import { deName } from "./french";
 import { bigButton } from "./lesson-card";
+import { guardNetwork } from "./network-guard";
 import { OnlineSubmitButton } from "./online-submit-button";
 
 /** "Élève absent", after a confirmation: the lesson is cancelled and counted as a no-show. */
@@ -35,7 +37,7 @@ export function AbsentButton({ lessonId, studentName, summary }: { lessonId: str
       >
         Élève absent
       </Button>
-      <Dialog open={open} onClose={() => setOpen(false)} title={`${studentName} est absent(e) ?`} description={summary}>
+      <Dialog open={open} onClose={() => setOpen(false)} title={`Absence ${deName(studentName)} ?`} description={summary}>
         <AbsentForm key={attemptKey} lessonId={lessonId} onCancel={() => setOpen(false)} onDone={() => setOpen(false)} />
       </Dialog>
     </>
@@ -45,15 +47,18 @@ export function AbsentButton({ lessonId, studentName, summary }: { lessonId: str
 function AbsentForm({ lessonId, onCancel, onDone }: { lessonId: string; onCancel: () => void; onDone: () => void }) {
   const { announce } = useInstructorFeedback();
   const errorRef = useRef<HTMLDivElement>(null);
-  const [state, formAction] = useActionState(async (prev: InstructorActionState, formData: FormData) => {
-    const next = await markAbsentAction(prev, formData);
-    if (next.status === "success") {
-      onDone();
-      announce(next.message ?? "Absence enregistrée.", "warning");
-      refreshOfflineCopy();
-    }
-    return next;
-  }, INITIAL_INSTRUCTOR_STATE);
+  const [state, formAction] = useActionState(
+    guardNetwork(async (prev: InstructorActionState, formData: FormData) => {
+      const next = await markAbsentAction(prev, formData);
+      if (next.status === "success") {
+        onDone();
+        announce(next.message ?? "Absence enregistrée.", "warning");
+        refreshOfflineCopy();
+      }
+      return next;
+    }),
+    INITIAL_INSTRUCTOR_STATE,
+  );
   useEffect(() => {
     if (state.status === "error") errorRef.current?.focus();
   }, [state]);
@@ -61,7 +66,7 @@ function AbsentForm({ lessonId, onCancel, onDone }: { lessonId: string; onCancel
   return (
     <form action={formAction}>
       <input type="hidden" name="lessonId" value={lessonId} />
-      <Alert tone="warning" title="L'absence est enregistrée comme à l'accueil">
+      <Alert tone="warning" title="L'absence sera enregistrée comme à l'accueil">
         La leçon est annulée et comptée selon les règles de l&apos;auto-école. L&apos;accueil voit l&apos;absence dans le
         planning.
       </Alert>

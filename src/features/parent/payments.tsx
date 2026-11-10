@@ -5,9 +5,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingLabel, Skeleton } from "@/components/ui/skeleton";
 import { INVOICE_STATUS_META } from "@/features/paiements/payment-meta";
 import { BalanceSummary } from "@/features/solde/balance-summary";
-import { formatCurrency, formatDate, formatDateShort } from "@/lib/format";
-import type { Invoice } from "@/lib/types";
-import { ChildNotFound, NOT_FOUND_TITLE } from "./child-not-found";
+import { formatCurrency, formatDate, formatDateShort, formatHours } from "@/lib/format";
+import type { Balance, Invoice } from "@/lib/types";
+import { MissingChild, missingChildTitle } from "./child-not-found";
 import { getPagePayments } from "./data";
 import { InstallmentPlan } from "./installment-plan";
 
@@ -16,7 +16,23 @@ const icon = "size-5";
 /** "Les paiements de Léa". Render inside <Suspense>. */
 export async function PaymentsTitle({ child }: { child: string | null }) {
   const data = await getPagePayments(child);
-  return <>{data ? `Les paiements de ${data.child.firstName}` : NOT_FOUND_TITLE}</>;
+  return <>{data ? `Les paiements de ${data.child.firstName}` : await missingChildTitle()}</>;
+}
+
+/** The balance explained to the parent (BalanceSummary's default speaks to the student). */
+function balanceAdvice(balance: Balance, firstName: string): string | undefined {
+  switch (balance.state) {
+    case "ok":
+      return undefined;
+    case "low":
+      return `Il ne reste à ${firstName} que ${formatHours(balance.afterReservationsHours)} après ses leçons réservées. Pensez à prévoir le prochain paiement.`;
+    case "exhausted":
+      return `Toutes les heures payées de ${firstName} sont utilisées ou réservées : un paiement est nécessaire pour réserver de nouvelles leçons.`;
+    case "uncovered":
+      return `${firstName} dispose de ${formatHours(balance.availableHours)} payées, mais ${formatHours(balance.reservedHours)} sont programmées. Un paiement est nécessaire pour couvrir toutes ses leçons.`;
+    case "overdrawn":
+      return `${formatHours(balance.toCoverHours)} ont été consommées sans paiement correspondant. Un paiement est nécessaire.`;
+  }
 }
 
 function InvoiceStatusBadge({ status }: { status: Invoice["status"] }) {
@@ -31,7 +47,7 @@ function InvoiceStatusBadge({ status }: { status: Invoice["status"] }) {
 /** Balance of hours, payment plan and invoices of the child. Render inside <Suspense>. */
 export async function PaymentsContent({ child }: { child: string | null }) {
   const data = await getPagePayments(child);
-  if (!data) return <ChildNotFound />;
+  if (!data) return <MissingChild />;
   const { balance, installments, invoices, child: kid } = data;
 
   return (
@@ -43,7 +59,11 @@ export async function PaymentsContent({ child }: { child: string | null }) {
           icon={<Hourglass className={icon} aria-hidden />}
         />
         <CardBody>
-          <BalanceSummary balance={balance} headline="Heures restantes après ses réservations" />
+          <BalanceSummary
+            balance={balance}
+            headline="Heures restantes après ses réservations"
+            message={balanceAdvice(balance, kid.firstName)}
+          />
         </CardBody>
         <div className="mt-auto flex items-start gap-3 border-t border-line px-5 py-4 text-sm text-ink-muted sm:px-6">
           <Store className="mt-0.5 size-4 shrink-0 text-ink-subtle" aria-hidden />
@@ -57,7 +77,7 @@ export async function PaymentsContent({ child }: { child: string | null }) {
       <Card className="flex min-w-0 flex-col">
         <CardHeader
           title="Échéancier"
-          description="Le forfait réglé en plusieurs fois."
+          description="Le forfait et les heures en plus, réglés en plusieurs fois."
           icon={<CalendarClock className={icon} aria-hidden />}
         />
         {installments.length === 0 ? (

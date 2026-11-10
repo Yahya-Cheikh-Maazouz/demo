@@ -12,6 +12,7 @@ import { formatDateLong, formatTimeRange } from "@/lib/format";
 import type { LeaveReason } from "@/lib/types";
 import { INITIAL_LEAVE_STATE, type LeaveActionState } from "./action-state";
 import { declareLeaveAction } from "./actions";
+import { guardNetwork } from "./network-guard";
 import { OnlineSubmitButton } from "./online-submit-button";
 
 const REASONS: LeaveReason[] = ["Congés", "Maladie", "Formation", "Autre"];
@@ -32,18 +33,29 @@ export function LeaveForm({ today, defaultDay, agencyPhone }: { today: string; d
   const reasonLegendId = useId();
   const reasonErrorId = useId();
 
-  const [state, formAction] = useActionState(async (prev: LeaveActionState, formData: FormData) => {
-    // The previous state travels to the server with the form: only its counter is needed there,
-    // not the list of conflicting lessons of the last attempt.
-    const next = await declareLeaveAction({ status: prev.status, attempt: prev.attempt }, formData);
-    if (next.status === "success") {
-      setDraft(emptyDraft(defaultDay));
-      refreshOfflineCopy();
-    }
-    return next;
-  }, INITIAL_LEAVE_STATE);
+  // A network failure keeps the fields as typed (the draft lives outside the keyed form).
+  const [state, formAction] = useActionState(
+    guardNetwork(async (prev: LeaveActionState, formData: FormData) => {
+      // The previous state travels to the server with the form: only its counter is needed there,
+      // not the list of conflicting lessons of the last attempt.
+      const next = await declareLeaveAction({ status: prev.status, attempt: prev.attempt }, formData);
+      if (next.status === "success") {
+        setDraft(emptyDraft(defaultDay));
+        refreshOfflineCopy();
+      }
+      return next;
+    }),
+    INITIAL_LEAVE_STATE,
+  );
 
   useFocusAfterError(formRef, state, undefined, alertRef);
+  // Only the motif is wrong (none chosen): the hook above found the radio group, which cannot take
+  // the focus. Give it to the first motif.
+  useEffect(() => {
+    const form = formRef.current;
+    if (state.status !== "error" || !state.fieldErrors?.reason || !form || form.contains(document.activeElement)) return;
+    form.querySelector<HTMLInputElement>('input[name="reason"]')?.focus();
+  }, [state]);
   useEffect(() => {
     if (state.status === "success") successRef.current?.focus();
   }, [state]);
@@ -137,7 +149,11 @@ export function LeaveForm({ today, defaultDay, agencyPhone }: { today: string; d
         </div>
       </fieldset>
 
-      <fieldset aria-describedby={errors?.reason ? reasonErrorId : undefined} aria-invalid={errors?.reason ? true : undefined}>
+      <fieldset
+        role="radiogroup"
+        aria-invalid={errors?.reason ? true : undefined}
+        aria-describedby={errors?.reason ? reasonErrorId : undefined}
+      >
         <legend id={reasonLegendId} className="text-base font-bold text-ink">
           Motif
         </legend>
@@ -158,6 +174,7 @@ export function LeaveForm({ today, defaultDay, agencyPhone }: { today: string; d
                   value={reason}
                   checked={checked}
                   onChange={() => edit({ reason })}
+                  aria-describedby={errors?.reason ? reasonErrorId : undefined}
                   className="size-5 accent-[var(--brand)]"
                 />
                 {reason}

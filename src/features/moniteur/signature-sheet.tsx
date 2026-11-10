@@ -10,6 +10,7 @@ import { INITIAL_INSTRUCTOR_STATE, type InstructorActionState } from "./action-s
 import { signLessonAction } from "./actions";
 import { useInstructorFeedback } from "./feedback";
 import { bigButton } from "./lesson-card";
+import { guardNetwork } from "./network-guard";
 import { OnlineSubmitButton } from "./online-submit-button";
 
 /** Width of the stored image: enough to read a signature, far below the 200 Ko limit. */
@@ -34,9 +35,19 @@ export function SignatureSheet({ lessonId, studentName, summary }: SignatureShee
   const [open, setOpen] = useState(false);
   const [session, setSession] = useState(0);
   const online = useOnline();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  /**
+   * The dialog is unmounted rather than closed, so the browser does not give the focus back:
+   * do it here, unless the lesson was validated (the confirmation above the content takes it).
+   */
+  const close = (validated: boolean) => {
+    setOpen(false);
+    if (!validated) requestAnimationFrame(() => triggerRef.current?.focus());
+  };
   return (
     <>
       <Button
+        ref={triggerRef}
         size="lg"
         fullWidth
         className={bigButton}
@@ -56,14 +67,14 @@ export function SignatureSheet({ lessonId, studentName, summary }: SignatureShee
           lessonId={lessonId}
           studentName={studentName}
           summary={summary}
-          onClose={() => setOpen(false)}
+          onClose={close}
         />
       )}
     </>
   );
 }
 
-function SignatureDialog({ lessonId, studentName, summary, onClose }: SignatureSheetProps & { onClose: () => void }) {
+function SignatureDialog({ lessonId, studentName, summary, onClose }: SignatureSheetProps & { onClose: (validated: boolean) => void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawing = useRef<{ x: number; y: number } | null>(null);
@@ -76,15 +87,19 @@ function SignatureDialog({ lessonId, studentName, summary, onClose }: SignatureS
   const errorRef = useRef<HTMLDivElement>(null);
   const { announce } = useInstructorFeedback();
 
-  const [state, formAction] = useActionState(async (prev: InstructorActionState, formData: FormData) => {
-    const next = await signLessonAction(prev, formData);
-    if (next.status === "success") {
-      onClose();
-      announce(next.message ?? "Leçon validée.");
-      refreshOfflineCopy();
-    }
-    return next;
-  }, INITIAL_INSTRUCTOR_STATE);
+  // A network failure keeps the dialog open with the drawn signature: the student does not sign again.
+  const [state, formAction] = useActionState(
+    guardNetwork(async (prev: InstructorActionState, formData: FormData) => {
+      const next = await signLessonAction(prev, formData);
+      if (next.status === "success") {
+        onClose(true);
+        announce(next.message ?? "Leçon validée.");
+        refreshOfflineCopy();
+      }
+      return next;
+    }),
+    INITIAL_INSTRUCTOR_STATE,
+  );
 
   useEffect(() => {
     if (state.status === "error") errorRef.current?.focus();
@@ -179,7 +194,7 @@ function SignatureDialog({ lessonId, studentName, summary, onClose }: SignatureS
       aria-describedby={statementId}
       onCancel={(event) => {
         event.preventDefault();
-        onClose();
+        onClose(false);
       }}
       className="m-0 h-dvh max-h-none w-full max-w-none bg-surface p-0 text-ink backdrop:bg-ink/60 open:animate-[dialog-in_200ms_ease-out] sm:m-auto sm:h-[min(44rem,92dvh)] sm:max-w-2xl sm:rounded-3xl sm:shadow-raised"
     >
@@ -197,7 +212,7 @@ function SignatureDialog({ lessonId, studentName, summary, onClose }: SignatureS
           </div>
           <button
             type="button"
-            onClick={onClose}
+            onClick={() => onClose(false)}
             className="-mr-2 flex size-12 shrink-0 items-center justify-center rounded-full text-ink-subtle hover:bg-subtle hover:text-ink"
             aria-label="Fermer sans valider"
           >
@@ -231,7 +246,7 @@ function SignatureDialog({ lessonId, studentName, summary, onClose }: SignatureS
             )}
           </div>
           <p id={hintId} className="text-sm text-ink-muted">
-            L&apos;élève signe dans le cadre. « Effacer » pour recommencer.
+            L&apos;élève signe dans le cadre. « Effacer » pour recommencer.
           </p>
           {tooHeavy && (
             <Alert tone="warning" role="alert">

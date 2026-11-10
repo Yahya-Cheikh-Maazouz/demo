@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, Loader2, ShieldOff, X } from "lucide-react";
-import { useActionState, useId, useOptimistic, useRef, useState } from "react";
+import { useActionState, useEffect, useId, useOptimistic, useRef, useState } from "react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,15 @@ export function ConsentRow({ childId, firstName, consent }: { childId: string; f
   }, INITIAL_CONSENT_STATE);
 
   const needsConfirmation = consent.required && consent.granted;
-  const refusedRequired = consent.required && !consent.granted && consent.decidedAt !== null;
+  const decided = consent.decidedAt !== null;
+  const refusedRequired = consent.required && !consent.granted && decided;
+
+  // "Ne pas autoriser" disappears once a decision exists: keep the keyboard focus in the row.
+  useEffect(() => {
+    if (state.status !== "success") return;
+    const active = document.activeElement;
+    if (!active || active === document.body) switchRef.current?.focus();
+  }, [state.status, state.attempt, decided]);
 
   return (
     <li className="px-5 py-5 sm:px-6" data-consent={consent.key}>
@@ -124,7 +132,7 @@ export function ConsentRow({ childId, firstName, consent }: { childId: string; f
               </p>
             </div>
 
-            {consent.decidedAt === null && (
+            {!decided && (
               <button
                 type="submit"
                 name="granted"
@@ -140,7 +148,7 @@ export function ConsentRow({ childId, firstName, consent }: { childId: string; f
             {refusedRequired && (
               <Alert tone="danger" icon={ShieldOff} className="mt-3" title="Formation suspendue">
                 Sans ce consentement, l&apos;auto-école ne peut plus traiter les données de {firstName} : aucune nouvelle
-                leçon ni inscription à l&apos;examen. Réactivez-le pour reprendre la formation.
+                leçon ni aucun examen ne peut être planifié. Réactivez-le pour reprendre la formation.
               </Alert>
             )}
 
@@ -187,12 +195,15 @@ export function ConsentRow({ childId, firstName, consent }: { childId: string; f
             <li className="flex gap-2">
               <span aria-hidden>•</span>
               <span>
-                La formation de {firstName} est suspendue : plus de nouvelles leçons ni d&apos;inscription à l&apos;examen.
+                La formation de {firstName} est suspendue : plus aucune leçon ni aucun examen ne peut être planifié, et ses
+                demandes en attente ne peuvent plus être confirmées.
               </span>
             </li>
             <li className="flex gap-2">
               <span aria-hidden>•</span>
-              <span>L&apos;auto-école est prévenue et vous contactera pour en parler.</span>
+              <span>
+                Les leçons déjà planifiées restent prévues. L&apos;auto-école est prévenue et vous contactera pour en parler.
+              </span>
             </li>
             <li className="flex gap-2">
               <span aria-hidden>•</span>

@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HomeContent, HomeContentSkeleton, HomeEyebrow, HomeTitle } from "@/features/parent/home-blocks";
+import { ChildPageDescription } from "@/features/parent/child-not-found";
 import { childParam } from "@/features/parent/query";
 
 export const metadata: Metadata = {
@@ -10,6 +11,13 @@ export const metadata: Metadata = {
 };
 
 type SearchParams = PageProps<"/parent">["searchParams"];
+
+const DESCRIPTION = "Suivez sa formation et validez ce qui vous concerne.";
+
+/** The description, or why the child cannot be shown. */
+async function Description({ searchParams }: { searchParams: SearchParams }) {
+  return <ChildPageDescription child={childParam(await searchParams)} text={DESCRIPTION} />;
+}
 
 async function Eyebrow({ searchParams }: { searchParams: SearchParams }) {
   return <HomeEyebrow child={childParam(await searchParams)} />;
@@ -41,7 +49,11 @@ export default function ParentHomePage({ searchParams }: PageProps<"/parent">) {
             <Title searchParams={searchParams} />
           </Suspense>
         }
-        description="Suivez sa formation et validez ce qui vous concerne."
+        description={
+          <Suspense fallback={DESCRIPTION}>
+            <Description searchParams={searchParams} />
+          </Suspense>
+        }
       />
       <Suspense fallback={<HomeContentSkeleton />}>
         <Content searchParams={searchParams} />

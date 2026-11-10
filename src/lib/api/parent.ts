@@ -92,23 +92,27 @@ export async function getChildAuthorisations(childId: string | null): Promise<Ch
 }
 
 // ---------------------------------------------------------------------------
-// Mutations. Codes: "introuvable" (child not linked), "lecture_seule" / "suspendu" (school's
+// Mutations. Codes: "introuvable" (child not linked, or no longer: archived file, child of age,
+// another legal guardian in the school's file), "lecture_seule" / "suspendu" (school's
 // subscription), plus those listed on each function.
 
-/** Records the parent's decision, with its date and author. Code "invalide" for an unknown key. */
+/**
+ * Records the parent's decision, with its date and author. Code "invalide" for an unknown key.
+ * Withdrawing a consent stays possible in read-only mode: it must be as easy as giving it (RGPD).
+ */
 export async function setChildConsent(
   childId: string,
   key: ConsentKey,
   granted: boolean,
 ): Promise<ActionResult<{ consent: Consent }>> {
   const { userId, tenant, now } = await context();
-  const blocked = subscriptionBlock(tenant, now);
+  const blocked = granted ? subscriptionBlock(tenant, now) : null;
   if (blocked) return blocked;
   await settle();
   return parentSpace.writeConsent(userId, childKey(childId) ?? "", key, granted, now);
 }
 
-/** Accepts or refuses an item proposed by the school. Codes "deja_traitee", "formule_retiree". */
+/** Accepts or refuses an item proposed by the school. Codes "deja_traitee", "formule_modifiee". */
 export async function decideChildValidation(
   childId: string,
   validationId: string,
@@ -137,20 +141,19 @@ export async function payChildInstallment(
   return parentSpace.writePayChildInstallment(userId, childKey(childId) ?? "", installmentId, method, now);
 }
 
+// A person's RGPD rights do not depend on the school's subscription: export and deletion stay
+// available in read-only mode (as in the student space).
+
 /** RGPD: the export of the parent's own data is prepared by the backend and sent by e-mail. */
 export async function requestParentDataExport(): Promise<ActionResult> {
-  const { tenant, now } = await context();
-  const blocked = subscriptionBlock(tenant, now);
-  if (blocked) return blocked;
+  await context();
   await settle();
   return { ok: true };
 }
 
 /** RGPD: the school processes the request; invoices are kept for the legal retention period. */
 export async function requestParentAccountDeletion(): Promise<ActionResult<{ requestedAt: string }>> {
-  const { userId, tenant, now } = await context();
-  const blocked = subscriptionBlock(tenant, now);
-  if (blocked) return blocked;
+  const { userId, now } = await context();
   await settle();
   return parentSpace.writeParentDeletionRequest(userId, now);
 }

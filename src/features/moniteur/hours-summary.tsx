@@ -1,4 +1,5 @@
-import { CalendarCheck, CalendarClock, CalendarRange, Info, UserX, type LucideIcon } from "lucide-react";
+import Link from "next/link";
+import { CalendarCheck, CalendarClock, CalendarRange, ChevronRight, Info, PenLine, UserX, type LucideIcon } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Card } from "@/components/ui/card";
 import { LoadingLabel, Skeleton } from "@/components/ui/skeleton";
@@ -36,11 +37,14 @@ function Stat({
   );
 }
 
-/** "du 2 au 8 nov." */
+/** "du 2 au 8 nov.", or "du 30 nov. au 6 déc." when the week spans two months. */
 function weekRange(monday: string): string {
   const start = parisDateTime(monday, 12).toISOString();
   const end = parisDateTime(addDays(monday, 6), 12).toISOString();
-  return `du ${formatDayOfMonth(start)} au ${formatDayOfMonth(end)} ${formatMonthShort(end)}`;
+  const startMonth = formatMonthShort(start);
+  const endMonth = formatMonthShort(end);
+  const from = startMonth === endMonth ? formatDayOfMonth(start) : `${formatDayOfMonth(start)} ${startMonth}`;
+  return `du ${from} au ${formatDayOfMonth(end)} ${endMonth}`;
 }
 
 /** Hours given this week and this month, and what is left this week. Render inside <Suspense>. */
@@ -63,6 +67,28 @@ export async function HoursSummary() {
             hint={week.requestedHours > 0 ? `+ ${formatHours(week.requestedHours)} de demandes à confirmer` : undefined}
           />
         </div>
+        {week.toSignLessons > 0 && (
+          // Started but not signed: in neither figure above until the émargement.
+          <Link
+            href="/moniteur"
+            className="flex items-center gap-4 rounded-3xl border border-warning/40 bg-warning-soft p-5 transition-colors hover:border-warning/60"
+          >
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-2xl bg-surface text-warning">
+              <PenLine className="size-5" aria-hidden />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="eyebrow block">À émarger</span>
+              <span className="mt-1.5 block text-[2rem] leading-none font-extrabold tracking-[-0.03em] text-ink tabular-nums">
+                {formatHours(week.toSignHours)}
+              </span>
+              <span className="mt-1.5 block text-sm font-semibold text-ink-muted">
+                {week.toSignLessons > 1 ? `${week.toSignLessons} leçons commencées, pas encore signées` : "1 leçon commencée, pas encore signée"}
+              </span>
+              <span className="mt-0.5 block text-sm text-ink-muted">Comptées dans « Effectuées » une fois émargées.</span>
+            </span>
+            <ChevronRight className="size-5 shrink-0 text-ink-subtle" aria-hidden />
+          </Link>
+        )}
       </section>
 
       <section aria-labelledby="heures-mois" className="space-y-3 pt-2">

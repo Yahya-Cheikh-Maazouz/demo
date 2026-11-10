@@ -11,6 +11,8 @@ import { cn } from "@/lib/cn";
 import { INITIAL_INSTRUCTOR_STATE, type InstructorActionState } from "./action-state";
 import { reviewRequestAction } from "./actions";
 import { useInstructorFeedback } from "./feedback";
+import { deName } from "./french";
+import { guardNetwork } from "./network-guard";
 import { OnlineSubmitButton } from "./online-submit-button";
 
 type RequestReviewProps = {
@@ -22,22 +24,44 @@ type RequestReviewProps = {
   className?: string;
 };
 
-/** Wraps the action: announces the result above the content, since this block leaves with the request. */
-function useReview() {
+/** Codes after which the request leaves the screen (refreshed list or sheet) together with this block. */
+const GONE_CODES = ["deja_traitee", "introuvable", "expiree"];
+
+/** Why a request the instructor answered is no longer there. */
+function goneMessage(code: string | undefined, studentName: string): string {
+  return code === "expiree"
+    ? `L'heure de la demande ${deName(studentName)} est passée sans réponse : voyez avec l'accueil.`
+    : `La demande ${deName(studentName)} n'est plus à traiter : l'élève l'a annulée ou l'accueil y a déjà répondu.`;
+}
+
+/**
+ * Wraps the action: announces the result above the content, since this block leaves with the
+ * request. A request handled elsewhere meanwhile leaves too: that is announced as well, otherwise
+ * it would vanish exactly like a confirmed one.
+ */
+function useReview(studentName: string, onGone?: () => void) {
   const { announce } = useInstructorFeedback();
-  return useActionState(async (prev: InstructorActionState, formData: FormData) => {
-    const next = await reviewRequestAction(prev, formData);
-    if (next.status === "success") {
-      announce(next.message ?? "Demande traitée.", next.code === "attente_paiement" ? "warning" : "success");
-      refreshOfflineCopy();
-    }
-    return next;
-  }, INITIAL_INSTRUCTOR_STATE);
+  return useActionState(
+    guardNetwork(async (prev: InstructorActionState, formData: FormData) => {
+      const next = await reviewRequestAction(prev, formData);
+      if (next.status === "success") {
+        onGone?.();
+        announce(next.message ?? "Demande traitée.", next.code === "attente_paiement" ? "warning" : "success");
+        refreshOfflineCopy();
+      } else if (next.status === "error" && GONE_CODES.includes(next.code ?? "")) {
+        onGone?.();
+        announce(goneMessage(next.code, studentName), "warning");
+        refreshOfflineCopy();
+      }
+      return next;
+    }),
+    INITIAL_INSTRUCTOR_STATE,
+  );
 }
 
 /** "Confirmer" (the student then sees « Planifié ») or "Refuser" (after a confirmation) a request. */
 export function RequestReview({ lessonId, studentName, summary, className }: RequestReviewProps) {
-  const [state, formAction] = useReview();
+  const [state, formAction] = useReview(studentName);
   const [refusing, setRefusing] = useState(false);
   const [refuseKey, setRefuseKey] = useState(0);
   const online = useOnline();
@@ -53,7 +77,7 @@ export function RequestReview({ lessonId, studentName, summary, className }: Req
         <input type="hidden" name="decision" value="accepte" />
         <OnlineSubmitButton size="lg" className="h-14 rounded-2xl text-base" icon={<CalendarCheck className="size-5" aria-hidden />} pendingLabel="Confirmation…">
           Confirmer
-          <span className="sr-only"> la demande de {studentName}</span>
+          <span className="sr-only"> la demande {deName(studentName)}</span>
         </OnlineSubmitButton>
         <Button
           variant="secondary"
@@ -68,7 +92,7 @@ export function RequestReview({ lessonId, studentName, summary, className }: Req
           }}
         >
           Refuser
-          <span className="sr-only"> la demande de {studentName}</span>
+          <span className="sr-only"> la demande {deName(studentName)}</span>
         </Button>
       </form>
 
@@ -81,24 +105,31 @@ export function RequestReview({ lessonId, studentName, summary, className }: Req
       )}
 
       <Dialog open={refusing} onClose={() => setRefusing(false)} title="Refuser cette demande ?" description={`${studentName} · ${summary}`}>
-        <RefuseForm key={refuseKey} lessonId={lessonId} onCancel={() => setRefusing(false)} onDone={() => setRefusing(false)} />
+        <RefuseForm
+          key={refuseKey}
+          lessonId={lessonId}
+          studentName={studentName}
+          onCancel={() => setRefusing(false)}
+          onDone={() => setRefusing(false)}
+        />
       </Dialog>
     </div>
   );
 }
 
-function RefuseForm({ lessonId, onCancel, onDone }: { lessonId: string; onCancel: () => void; onDone: () => void }) {
-  const { announce } = useInstructorFeedback();
+function RefuseForm({
+  lessonId,
+  studentName,
+  onCancel,
+  onDone,
+}: {
+  lessonId: string;
+  studentName: string;
+  onCancel: () => void;
+  onDone: () => void;
+}) {
   const errorRef = useRef<HTMLDivElement>(null);
-  const [state, formAction] = useActionState(async (prev: InstructorActionState, formData: FormData) => {
-    const next = await reviewRequestAction(prev, formData);
-    if (next.status === "success") {
-      onDone();
-      announce(next.message ?? "Demande refusée.");
-      refreshOfflineCopy();
-    }
-    return next;
-  }, INITIAL_INSTRUCTOR_STATE);
+  const [state, formAction] = useReview(studentName, onDone);
   useEffect(() => {
     if (state.status === "error") errorRef.current?.focus();
   }, [state]);

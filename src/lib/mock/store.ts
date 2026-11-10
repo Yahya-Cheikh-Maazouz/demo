@@ -75,6 +75,7 @@ import {
   type StudentFixture,
 } from "./data";
 import { addDays, mondayOf, parisDateTime, parisMinutes, parisTime, parisWeekday, parisWeekKey, weekdayOf } from "@/lib/paris-time";
+import { seedGuardians, trainingSuspension } from "./guardian";
 
 export { DEFAULT_TENANT_SLUG };
 
@@ -249,13 +250,14 @@ export type StudentRecord = {
   evaluationResult?: EvaluationResult;
   /** Skills record filled in by the instructors (C1 to C4 in %, comments), seeded on first read. */
   livret?: { progress: [number, number, number, number]; feedback: Array<{ text: string; author: string; at: string }> };
-  /** Parent space: the legal guardian's authorisations and validations, seeded on first read by parent-space.ts. */
+  /**
+   * Parent space: the legal guardian's authorisations and the school's proposals. Seeded with the
+   * school's state for the children of a parent account (guardian.ts), then written on decisions.
+   */
   guardian?: {
     consents: Partial<Record<import("@/lib/types").ConsentKey, { granted: boolean; decidedAt: string; decidedBy: string }>>;
-    /** `packageId`: the formula proposed by a "changement_formule". */
-    validations: Array<import("@/lib/types").GuardianValidation & { packageId?: string }>;
-    /** A payment plan was seeded once for a child who had none. */
-    planSeeded: boolean;
+    /** `offer`: the formula proposed by a "changement_formule", frozen when it was proposed. */
+    validations: Array<import("@/lib/types").GuardianValidation & { offer?: StudentPackage }>;
   };
 };
 
@@ -770,6 +772,8 @@ function seedTenant(slug: string, now: Date): TenantState {
   for (const f of fixtures.filter((f) => f.scripted)) t.lessons.push(...scriptedLessons(t, f.id, now));
   generateLessons(t, fixtures.filter((f) => !f.scripted), now);
   for (const f of fixtures) seedPayments(t, f, now);
+  // Children followed by a parent account: consents, proposal, payment plan (guardian.ts).
+  seedGuardians(t, now, (s, date, label, amount, hours, method) => seedPayment(t, s, date, label, amount, hours, method));
 
   // One invoice sequence per school, without gaps, in date order.
   const numbers = new Map<string, string>();
@@ -1089,6 +1093,8 @@ export function writeRequestLesson(
   options: { acceptPendingPayment?: boolean } = {},
 ): ActionResult<{ lesson: Lesson }> {
   const { t, s } = studentContext(userId, now);
+  const suspended = trainingSuspension(s);
+  if (suspended) return suspended;
   const rules = t.settings.rules.booking;
   const start = Date.parse(input.start);
   if (!REQUESTABLE_TYPES.includes(input.type) || !REQUEST_DURATIONS.includes(input.durationHours) || Number.isNaN(start)) {
@@ -1457,6 +1463,9 @@ export function writeCreateLesson(
 ): ActionResult<{ lesson: Lesson; pendingPayment: boolean }> {
   const t = tenantState(tenantSlug, now);
   if (!t.students.has(input.studentId)) return { ok: false, code: "introuvable", error: "Élève introuvable." };
+  // Not even forced: the legal guardian's withdrawal of the RGPD consent stops the training.
+  const suspended = trainingSuspension(t.students.get(input.studentId));
+  if (suspended) return suspended;
   const instructor = t.staff.instructors.find((i) => i.id === input.instructorId);
   if (!instructor) return { ok: false, code: "introuvable", error: "Moniteur introuvable." };
   const start = Date.parse(input.start);
@@ -1573,6 +1582,8 @@ export function writeReviewLessonRequest(
     lesson.status = "annule";
     return { ok: true, data: { lesson } };
   }
+  const suspended = trainingSuspension(t.students.get(lesson.studentId));
+  if (suspended) return suspended;
   const covered = !COUNTED_TYPES.includes(lesson.type) || computeBalance(t, lesson.studentId, now).afterReservationsHours >= 0;
   lesson.status = covered ? "confirme" : "attente_paiement";
   return { ok: true, data: { lesson } };

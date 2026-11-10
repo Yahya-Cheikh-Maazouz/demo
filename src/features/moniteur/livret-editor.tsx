@@ -11,6 +11,8 @@ import { formatPercent } from "@/lib/format";
 import type { Competence } from "@/lib/types";
 import { INITIAL_INSTRUCTOR_STATE, LIVRET_NOTE_MAX, LIVRET_STEP, type InstructorActionState } from "./action-state";
 import { updateLivretAction } from "./actions";
+import { deName } from "./french";
+import { guardNetwork } from "./network-guard";
 import { OnlineSubmitButton } from "./online-submit-button";
 
 type LivretEditorProps = {
@@ -28,6 +30,9 @@ function stepped(value: number, direction: 1 | -1): number {
 /**
  * The 4 REMC competences with big −/+ buttons (steps of 5 %) and the comment after the lesson.
  * Values live here, outside the keyed form, so they survive an error; the comment is cleared once saved.
+ * The levels the page was rendered with go along as the baseline: the API writes only the
+ * competences changed from it, and refuses ("modifie") when another instructor changed one of them
+ * meanwhile. The refreshed page then brings the new baseline, and a second save goes through.
  */
 export function LivretEditor({ lessonId, competences, studentFirstName }: LivretEditorProps) {
   const [values, setValues] = useState(() => competences.map((c) => c.progress));
@@ -36,18 +41,22 @@ export function LivretEditor({ lessonId, competences, studentFirstName }: Livret
   const errorRef = useRef<HTMLDivElement>(null);
   const successRef = useRef<HTMLDivElement>(null);
 
-  const [state, formAction] = useActionState(async (prev: InstructorActionState, formData: FormData) => {
-    const next = await updateLivretAction(prev, formData);
-    if (next.status === "success") {
-      setNote("");
-      refreshOfflineCopy();
-    }
-    return next;
-  }, INITIAL_INSTRUCTOR_STATE);
+  // A network failure keeps the levels and the comment typed so far.
+  const [state, formAction] = useActionState(
+    guardNetwork(async (prev: InstructorActionState, formData: FormData) => {
+      const next = await updateLivretAction(prev, formData);
+      if (next.status === "success") {
+        setNote("");
+        refreshOfflineCopy();
+      }
+      return next;
+    }),
+    INITIAL_INSTRUCTOR_STATE,
+  );
 
   useFocusAfterError(formRef, state, undefined, errorRef);
   useEffect(() => {
-    if (state.status === "success") successRef.current?.focus();
+    if (state.status === "success" || state.status === "info") successRef.current?.focus();
   }, [state]);
 
   const saved = competences.map((c) => c.progress);
@@ -57,8 +66,11 @@ export function LivretEditor({ lessonId, competences, studentFirstName }: Livret
     // Remounted on every result: React resets a form's DOM after an action, even controlled fields.
     <form key={state.attempt ?? 0} ref={formRef} action={formAction} className="space-y-5">
       <input type="hidden" name="lessonId" value={lessonId} />
+      {competences.map((c, index) => (
+        <input key={c.code} type="hidden" name={`avant-${c.code}`} value={saved[index]} />
+      ))}
       <fieldset>
-        <legend className="text-sm font-semibold text-ink">Niveau de {studentFirstName} par compétence</legend>
+        <legend className="text-sm font-semibold text-ink">Niveau {deName(studentFirstName)} par compétence</legend>
         <ul className="mt-3 space-y-3">
           {competences.map((competence, index) => (
             <CompetenceStepper
@@ -97,9 +109,9 @@ export function LivretEditor({ lessonId, competences, studentFirstName }: Livret
           </Alert>
         </div>
       )}
-      {state.status === "success" && !changed && (
+      {(state.status === "success" || state.status === "info") && !changed && (
         <div ref={successRef} tabIndex={-1} className="rounded-2xl outline-none">
-          <Alert key={state.attempt} tone="success" title={state.message} />
+          <Alert key={state.attempt} tone={state.status === "info" ? "info" : "success"} role="status" title={state.message} />
         </div>
       )}
 
@@ -124,8 +136,11 @@ function CompetenceStepper({
   onChange: (value: number) => void;
 }) {
   const labelId = useId();
+  // aria-disabled rather than disabled at 0 and 100 %: a disabled button would drop the focus.
   const stepButton =
-    "flex size-12 shrink-0 items-center justify-center rounded-2xl border border-line-strong bg-surface text-ink transition-colors hover:bg-subtle active:scale-95 disabled:opacity-40";
+    "flex size-12 shrink-0 items-center justify-center rounded-2xl border border-line-strong bg-surface text-ink transition-colors hover:bg-subtle active:scale-95 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-surface aria-disabled:active:scale-100";
+  const atMin = value <= 0;
+  const atMax = value >= 100;
   return (
     <li className="rounded-2xl border border-line p-3">
       <div className="flex items-center gap-3">
@@ -139,9 +154,12 @@ function CompetenceStepper({
           <button
             type="button"
             className={stepButton}
-            onClick={() => onChange(stepped(value, -1))}
-            disabled={value <= 0}
-            aria-label={`Baisser ${code} de ${LIVRET_STEP} %`}
+            onClick={() => {
+              if (!atMin) onChange(stepped(value, -1));
+            }}
+            aria-disabled={atMin || undefined}
+            aria-label={`Baisser ${code}`}
+            title={`Baisser ${code} (palier de ${LIVRET_STEP} %)`}
           >
             <Minus className="size-5" aria-hidden />
           </button>
@@ -152,9 +170,12 @@ function CompetenceStepper({
           <button
             type="button"
             className={stepButton}
-            onClick={() => onChange(stepped(value, 1))}
-            disabled={value >= 100}
-            aria-label={`Monter ${code} de ${LIVRET_STEP} %`}
+            onClick={() => {
+              if (!atMax) onChange(stepped(value, 1));
+            }}
+            aria-disabled={atMax || undefined}
+            aria-label={`Monter ${code}`}
+            title={`Monter ${code} (palier de ${LIVRET_STEP} %)`}
           >
             <Plus className="size-5" aria-hidden />
           </button>

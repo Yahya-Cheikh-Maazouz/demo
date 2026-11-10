@@ -135,16 +135,36 @@ export function InstallmentPlan({
           total={next.amount}
           action={formAction}
           hiddenFields={{ childId, installmentId: next.id }}
-          error={ownError && !state.fieldErrors?.method ? state.message : undefined}
         >
           <PaymentMethodFieldset
             legend="Moyen de paiement"
             defaultValue="carte"
             error={ownError ? state.fieldErrors?.method : undefined}
           />
+          {ownError && !state.fieldErrors?.method && state.message && (
+            <PaymentError key={state.attempt} message={state.message} />
+          )}
         </CheckoutDialog>
       )}
     </CardBody>
+  );
+}
+
+/**
+ * Why the payment failed, in the dialog. Takes the focus: the submit button that had it was
+ * disabled while the payment was pending, which left the focus on the page.
+ */
+function PaymentError({ message }: { message: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.focus();
+  }, []);
+  return (
+    <div ref={ref} tabIndex={-1} className="rounded-2xl outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand">
+      <Alert tone="danger" role="alert" title="Le paiement n'a pas pu être lancé">
+        {message}
+      </Alert>
+    </div>
   );
 }
 

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { LessonDetail, LessonDetailSkeleton } from "@/features/moniteur/lesson-detail";
+import { PlanningAccess } from "@/features/moniteur/planning-access";
 
 export const metadata: Metadata = {
   title: "Fiche leçon",
@@ -10,7 +11,9 @@ export const metadata: Metadata = {
 export default function InstructorLessonPage({ params }: PageProps<"/moniteur/lecons/[id]">) {
   return (
     <Suspense fallback={<LessonDetailSkeleton />}>
-      <LessonDetail id={params.then((p) => p.id)} />
+      <PlanningAccess>
+        <LessonDetail id={params.then((p) => p.id)} />
+      </PlanningAccess>
     </Suspense>
   );
 }

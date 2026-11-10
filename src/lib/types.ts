@@ -762,7 +762,14 @@ export type InstructorStudent = {
   id: string;
   firstName: string;
   lastName: string;
-  phone: string;
+  isMinor: boolean;
+  /**
+   * The student's own phone. Null for a minor whose legal guardian has not allowed direct phone
+   * contact (consent "contact_telephone"): the API does not send the number at all.
+   */
+  phone: string | null;
+  /** Set only for such a minor: the instructor calls the legal guardian instead. */
+  guardianContact: { name: string; phone: string } | null;
   /** Full NEPH: display it masked (NephValue). */
   neph: string | null;
   licence: string;
@@ -828,6 +835,9 @@ export type InstructorHours = {
     /** Confirmed lessons from now to Sunday. */
     plannedLessons: number;
     plannedHours: number;
+    /** Confirmed lessons of this week that have started and still wait for the émargement. */
+    toSignLessons: number;
+    toSignHours: number;
     /** Requests waiting for the instructor, from now to Sunday. */
     requestedHours: number;
   };

@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { DayView, DayViewSkeleton, parseDayParam } from "@/features/moniteur/day-view";
+import { PlanningAccess } from "@/features/moniteur/planning-access";
 
 export const metadata: Metadata = {
-  title: "Ma journée",
+  // A layout's title template only applies to its child segments, not to its own page.
+  title: { absolute: "Ma journée · Espace moniteur" },
 };
 
 async function Day({ searchParams }: { searchParams: PageProps<"/moniteur">["searchParams"] }) {
@@ -14,7 +16,9 @@ async function Day({ searchParams }: { searchParams: PageProps<"/moniteur">["sea
 export default function InstructorDayPage({ searchParams }: PageProps<"/moniteur">) {
   return (
     <Suspense fallback={<DayViewSkeleton />}>
-      <Day searchParams={searchParams} />
+      <PlanningAccess>
+        <Day searchParams={searchParams} />
+      </PlanningAccess>
     </Suspense>
   );
 }

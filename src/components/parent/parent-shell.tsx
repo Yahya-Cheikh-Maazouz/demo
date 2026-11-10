@@ -35,6 +35,19 @@ async function HeaderChild() {
   );
 }
 
+/** Sidebar links; they keep ?enfant= only for a linked child. */
+async function SidebarNav() {
+  const { children } = await getPageAccount();
+  return <ParentNav variant="sidebar" linked={children.map((c) => c.id)} />;
+}
+
+/** Mobile tab bar and its "Menu" sheet. */
+async function TabBar() {
+  const { children } = await getPageAccount();
+  const linked = children.map((c) => c.id);
+  return <ParentTabBar linked={linked} menu={<ParentMobileMenu linked={linked} />} />;
+}
+
 /** "Besoin d'aide ?" with the agency's phone number, at the bottom of the sidebar. */
 async function HelpLine() {
   const tenant = await getTenant();
@@ -60,7 +73,7 @@ async function UserChip() {
     <div className="flex items-center gap-1">
       <Link
         href="/parent/profil"
-        className="flex items-center gap-3 rounded-full border border-line bg-surface py-1 pr-3 pl-1 shadow-card transition-colors hover:bg-subtle sm:rounded-2xl sm:pr-4"
+        className="flex min-h-11 items-center gap-3 rounded-full border border-line bg-surface py-1 pr-3 pl-1 shadow-card transition-colors hover:bg-subtle sm:rounded-2xl sm:pr-4"
         aria-label={`Mon profil (${account.firstName} ${account.lastName})`}
       >
         <Avatar initials={initials(account.firstName, account.lastName)} size="sm" solid />
@@ -113,7 +126,7 @@ export function ParentShell({ children }: { children: ReactNode }) {
         </div>
         <nav aria-label="Navigation principale" className="flex-1 overflow-y-auto px-3 pt-2 pb-4">
           <Suspense fallback={<ParentNavFallback variant="sidebar" />}>
-            <ParentNav variant="sidebar" />
+            <SidebarNav />
           </Suspense>
         </nav>
         <div className="shrink-0 p-3">
@@ -158,8 +171,8 @@ export function ParentShell({ children }: { children: ReactNode }) {
         aria-label="Navigation principale"
         className="fixed inset-x-0 bottom-0 z-30 border-t border-line bg-surface/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:hidden"
       >
-        <Suspense fallback={<ParentTabBarFallback menu={<ParentMobileMenu />} />}>
-          <ParentTabBar menu={<ParentMobileMenu />} />
+        <Suspense fallback={<ParentTabBarFallback menu={<ParentMobileMenu linked={[]} />} />}>
+          <TabBar />
         </Suspense>
       </nav>
     </div>

@@ -14,12 +14,14 @@ import type {
   InstructorLeave,
   InstructorLesson,
   InstructorLessonDetail,
+  InstructorStudent,
   Leave,
   LeaveConflict,
   LeaveInput,
   LeaveReason,
   LeaveResult,
   Lesson,
+  LessonStatus,
   LessonType,
   Livret,
 } from "@/lib/types";
@@ -73,8 +75,25 @@ const isActive = (l: Lesson) => l.status === "a_confirmer" || l.status === "conf
 /** Confirmed: it will take place, or it took place and is still to sign. */
 const isConfirmed = (l: Lesson) => l.status === "confirme" || l.status === "attente_paiement";
 
+/**
+ * How the instructor reaches the student. A minor is called directly only when the legal guardian
+ * gave the "contact_telephone" consent (parent space); otherwise the student's number is not sent
+ * at all and the instructor gets the legal guardian's contact instead.
+ */
+function contactOf(record: StudentRecord | undefined): Pick<InstructorStudent, "isMinor" | "phone" | "guardianContact"> {
+  if (!record) return { isMinor: false, phone: null, guardianContact: null };
+  const { profile } = record;
+  if (!profile.isMinor) return { isMinor: false, phone: profile.phone || null, guardianContact: null };
+  if (record.guardian?.consents.contact_telephone?.granted === true) {
+    return { isMinor: true, phone: profile.phone || null, guardianContact: null };
+  }
+  const guardian = profile.legalGuardian;
+  return { isMinor: true, phone: null, guardianContact: guardian ? { name: guardian.name, phone: guardian.phone } : null };
+}
+
 function view(t: TenantState, lesson: Lesson): InstructorLesson {
-  const profile = t.students.get(lesson.studentId)?.profile;
+  const record = t.students.get(lesson.studentId);
+  const profile = record?.profile;
   return {
     id: lesson.id,
     studentId: lesson.studentId,
@@ -93,7 +112,7 @@ function view(t: TenantState, lesson: Lesson): InstructorLesson {
       id: lesson.studentId,
       firstName: profile?.firstName ?? "Élève",
       lastName: profile?.lastName ?? "",
-      phone: profile?.phone ?? "",
+      ...contactOf(record),
       neph: profile?.neph ?? null,
       licence: profile?.licence ?? "",
     },
@@ -115,10 +134,15 @@ type Failure = { ok: false; code: string; error: string };
 const NOT_FOUND: Failure = { ok: false, code: "introuvable", error: "Cette leçon est introuvable dans votre planning." };
 
 // ---------------------------------------------------------------------------
-// Demo: lessons left to sign, so the émargement can be shown on any day
+// Demo fixtures of the instructor space
 
 /** Hours left free by the generated timetable (lessons start at 8, 10, 14, 16 and 18). */
 const DEMO_HOURS = [12, 13];
+/** Days ahead of the agency's demo leave: after the week a test leave may cover. */
+const DEMO_LEAVE_DAYS = 9;
+
+/** `day`, or the next day when it is a Sunday (the school is closed). */
+const workdayFrom = (day: string) => (weekdayOf(day) === 0 ? addDays(day, 1) : day);
 
 /** Today once both demo lessons have started, otherwise the previous working day. */
 function demoDay(now: Date): string {
@@ -130,56 +154,97 @@ function demoDay(now: Date): string {
 
 const manualGearbox = (s: StudentRecord) => !s.profile.licence.includes("automatique");
 
+/** A 1 h driving lesson of the instructor, when the instructor, the student and a manual car are free. */
+function addDemoLesson(
+  t: TenantState,
+  instructorId: string,
+  student: StudentRecord | undefined,
+  day: string,
+  hour: number,
+  status: LessonStatus,
+  extra: Partial<Lesson> = {},
+) {
+  const instructor = t.staff.instructors.find((i) => i.id === instructorId);
+  if (!instructor || !student) return;
+  const start = parisDateTime(day, hour).getTime();
+  const end = start + HOUR_MS;
+  const busy = t.lessons.some(
+    (l) => l.status !== "annule" && overlaps(l, start, end) && (l.instructor.id === instructorId || l.studentId === student.profile.id),
+  );
+  const onLeave = t.leaves.some((l) => l.instructorId === instructorId && overlaps(l, start, end));
+  const vehicle = t.staff.vehicles.find(
+    (v) => v.gearbox === "manuelle" && !t.lessons.some((l) => l.status !== "annule" && l.vehicle?.id === v.id && overlaps(l, start, end)),
+  );
+  if (busy || onLeave || !vehicle) return;
+  t.lessons.push({
+    id: `l-${t.slug}-${++t.lessonSeq}`,
+    studentId: student.profile.id,
+    type: "conduite",
+    status,
+    start: new Date(start).toISOString(),
+    end: new Date(end).toISOString(),
+    durationHours: 1,
+    instructor,
+    vehicle,
+    meetingPoint: t.staff.meetingPoints[instructorId] ?? t.staff.agency,
+    freeCancellationUntil: new Date(start - t.settings.rules.booking.freeCancellationHours * HOUR_MS).toISOString(),
+    ...extra,
+  });
+}
+
 /**
- * Once per instructor: the student with a login (scripted story) and another adult student of the
- * instructor each get a 1 h lesson that has started and still waits for the émargement.
+ * Demo only, once per instructor and school state, so every screen of the space can be shown:
+ * - the student with a login (scripted story) and another adult student each get a 1 h lesson
+ *   that has started and still waits for the émargement;
+ * - on the next working day, a lesson waiting for a payment (red light) and one whose student
+ *   confirmed their presence;
+ * - a short leave entered by the agency, a week later.
+ * The real API has none of this. It runs on the instructor's day, lesson, hours and leaves reads
+ * and on mutations, never on the request count shown by every page of the shell.
  */
-function ensureDemoLessons(t: TenantState, instructorId: string, now: Date) {
+function ensureDemoFixtures(t: TenantState, instructorId: string, now: Date) {
   const seeded = demoSeeds.get(t) ?? new Set<string>();
   demoSeeds.set(t, seeded);
   if (seeded.has(instructorId)) return;
   seeded.add(instructorId);
 
-  const instructor = t.staff.instructors.find((i) => i.id === instructorId);
-  if (!instructor) return;
   const candidates = [...t.students.values()].filter(
     (s) => s.profile.referentInstructor.id === instructorId && !s.profile.isMinor && !s.profile.archived && manualGearbox(s),
   );
   const withLogin = candidates.find((s) => findUserById(s.profile.id)?.role === "eleve");
-  const other = candidates.find((s) => s !== withLogin && !findUserById(s.profile.id));
-  const day = demoDay(now);
+  const withoutLogin = candidates.filter((s) => s !== withLogin && !findUserById(s.profile.id));
+  const [other, unpaid = other, ready = other] = withoutLogin;
 
-  [withLogin, other].forEach((student, index) => {
-    if (!student) return;
-    const start = parisDateTime(day, DEMO_HOURS[index]).getTime();
-    const end = start + HOUR_MS;
-    const busy = t.lessons.some(
-      (l) => l.status !== "annule" && overlaps(l, start, end) && (l.instructor.id === instructorId || l.studentId === student.profile.id),
-    );
-    const onLeave = t.leaves.some((l) => l.instructorId === instructorId && overlaps(l, start, end));
-    const vehicle = t.staff.vehicles.find(
-      (v) => v.gearbox === "manuelle" && !t.lessons.some((l) => l.status !== "annule" && l.vehicle?.id === v.id && overlaps(l, start, end)),
-    );
-    if (busy || onLeave || !vehicle) return;
-    t.lessons.push({
-      id: `l-${t.slug}-${++t.lessonSeq}`,
-      studentId: student.profile.id,
-      type: "conduite",
-      status: "confirme",
-      start: new Date(start).toISOString(),
-      end: new Date(end).toISOString(),
-      durationHours: 1,
-      instructor,
-      vehicle,
-      meetingPoint: t.staff.meetingPoints[instructorId] ?? t.staff.agency,
-      freeCancellationUntil: new Date(start - t.settings.rules.booking.freeCancellationHours * HOUR_MS).toISOString(),
+  const signDay = demoDay(now);
+  addDemoLesson(t, instructorId, withLogin, signDay, DEMO_HOURS[0], "confirme");
+  addDemoLesson(t, instructorId, other, signDay, DEMO_HOURS[1], "confirme");
+
+  const today = dayKey(now.toISOString());
+  const nextDay = workdayFrom(addDays(today, 1));
+  addDemoLesson(t, instructorId, unpaid, nextDay, DEMO_HOURS[0], "attente_paiement");
+  addDemoLesson(t, instructorId, ready, nextDay, DEMO_HOURS[1], "confirme", { studentReadyAt: now.toISOString() });
+
+  const leaveDay = workdayFrom(addDays(today, DEMO_LEAVE_DAYS));
+  const leaveStart = parisDateTime(leaveDay, DEMO_HOURS[0]).getTime();
+  const leaveEnd = leaveStart + 2 * HOUR_MS;
+  const free =
+    !t.leaves.some((l) => l.instructorId === instructorId && overlaps(l, leaveStart, leaveEnd)) &&
+    !t.lessons.some((l) => l.instructor.id === instructorId && isActive(l) && overlaps(l, leaveStart, leaveEnd));
+  if (free) {
+    t.leaves.push({
+      id: nextId(t, "indispo"),
+      instructorId,
+      start: new Date(leaveStart).toISOString(),
+      end: new Date(leaveEnd).toISOString(),
+      reason: "Formation",
     });
-  });
+  }
 }
 
+/** The school's state, with the demo fixtures of the instructor. */
 function instructorState(tenantSlug: string, instructorId: string, now: Date): TenantState {
   const t = tenantState(tenantSlug, now);
-  ensureDemoLessons(t, instructorId, now);
+  ensureDemoFixtures(t, instructorId, now);
   return t;
 }
 
@@ -226,7 +291,8 @@ export function readInstructorLesson(
 
 /** Requests sent by the students, still to confirm, soonest first. */
 export function readInstructorRequests(tenantSlug: string, instructorId: string, now: Date): InstructorLesson[] {
-  const t = instructorState(tenantSlug, instructorId, now);
+  // Read on every page (count of the "Demandes" tab): no demo fixture from here.
+  const t = tenantState(tenantSlug, now);
   const nowIso = now.toISOString();
   return t.lessons
     .filter((l) => l.instructor.id === instructorId && l.status === "a_confirmer" && l.start > nowIso)
@@ -265,7 +331,8 @@ export function readInstructorHours(tenantSlug: string, instructorId: string, no
   const hours = (lessons: Lesson[]) => lessons.reduce((sum, l) => sum + l.durationHours, 0);
   const doneWeek = mine.filter((l) => l.status === "effectue" && within(l, weekStart, weekEnd));
   const doneMonth = mine.filter((l) => l.status === "effectue" && within(l, monthStart, monthEnd));
-  const planned = mine.filter((l) => isConfirmed(l) && within(l, nowMs, weekEnd));
+  const planned = mine.filter((l) => isConfirmed(l) && within(l, nowMs + 1, weekEnd));
+  const toSign = mine.filter((l) => isConfirmed(l) && within(l, weekStart, nowMs + 1));
   const requested = mine.filter((l) => l.status === "a_confirmer" && within(l, nowMs, weekEnd));
   return {
     now: now.toISOString(),
@@ -275,6 +342,8 @@ export function readInstructorHours(tenantSlug: string, instructorId: string, no
       doneHours: hours(doneWeek),
       plannedLessons: planned.length,
       plannedHours: hours(planned),
+      toSignLessons: toSign.length,
+      toSignHours: hours(toSign),
       requestedHours: hours(requested),
     },
     month: {
@@ -376,16 +445,26 @@ export function writeNoShow(
   return { ok: true, data: { lesson: view(t, lesson) } };
 }
 
+const LIVRET_CODES = ["C1", "C2", "C3", "C4"] as const;
+
+const validLevels = (levels: number[]) =>
+  levels.length === LIVRET_CODES.length && levels.every((p) => Number.isInteger(p) && p >= 0 && p <= 100);
+
 /**
  * Livret after a lesson: the 4 REMC competences (0–100) and an optional comment, signed with the
  * instructor's name. Only for the instructor's driving lessons and mock exams that took place or will.
+ *
+ * `baseline` holds the levels the instructor's screen started from. Only the competences that
+ * differ from it are written, so two instructors of the same student never undo each other's
+ * changes; "modifie" when one of those competences was changed meanwhile by someone else.
+ * Codes: "introuvable", "interdit", "invalide", "inchange", "modifie".
  */
 export function writeInstructorLivret(
   tenantSlug: string,
   instructorId: string,
   author: string,
   lessonId: string,
-  input: { progress: number[]; note: string | null },
+  input: { progress: number[]; baseline: number[]; note: string | null },
   now: Date,
 ): ActionResult<{ livret: Livret }> {
   const t = instructorState(tenantSlug, instructorId, now);
@@ -394,7 +473,26 @@ export function writeInstructorLivret(
   if (!LIVRET_TYPES.includes(lesson.type) || lesson.status === "a_confirmer" || lesson.status === "annule") {
     return { ok: false, code: "interdit", error: "Le livret se remplit pour une leçon de conduite confirmée ou effectuée." };
   }
-  return writeLivretUpdate(tenantSlug, lesson.studentId, author, input, now);
+  if (!validLevels(input.progress) || !validLevels(input.baseline)) {
+    return { ok: false, code: "invalide", error: "Les niveaux vont de 0 à 100 %." };
+  }
+  const note = input.note?.trim() || null;
+  const changed = LIVRET_CODES.map((_, i) => input.progress[i] !== input.baseline[i]);
+  if (!note && !changed.some(Boolean)) {
+    return { ok: false, code: "inchange", error: "Aucun niveau n'a changé et aucun retour n'est écrit : rien à enregistrer." };
+  }
+  const competences = readLivretFor(tenantSlug, lesson.studentId, now)?.competences ?? [];
+  const stored = LIVRET_CODES.map((code) => competences.find((c) => c.code === code)?.progress ?? 0);
+  const moved = LIVRET_CODES.filter((_, i) => changed[i] && stored[i] !== input.baseline[i]);
+  if (moved.length > 0) {
+    return {
+      ok: false,
+      code: "modifie",
+      error: `${moved.join(", ")} ${moved.length > 1 ? "ont été modifiées" : "a été modifiée"} entre-temps par un autre moniteur : vérifiez les niveaux affichés puis enregistrez à nouveau.`,
+    };
+  }
+  const progress = LIVRET_CODES.map((_, i) => (changed[i] ? input.progress[i] : stored[i]));
+  return writeLivretUpdate(tenantSlug, lesson.studentId, author, { progress, note }, now);
 }
 
 function conflictOf(t: TenantState, lesson: Lesson): LeaveConflict {
@@ -412,11 +510,19 @@ function conflictOf(t: TenantState, lesson: Lesson): LeaveConflict {
  * Declares a leave. Codes: "invalide" (fieldErrors start, end, reason), "chevauchement" (another
  * leave on the period), "conflit" (active lessons on the period, listed in `conflicts`).
  */
+/** Milliseconds of an ISO instant in UTC ("2026-11-12T07:00:00.000Z") naming a real calendar day, else NaN. */
+function isoInstant(value: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z$/.test(value)) return Number.NaN;
+  const ms = Date.parse(value);
+  // Date.parse rolls "2026-02-31" over to 3 March: the day must survive the round trip.
+  return !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === value.slice(0, 10) ? ms : Number.NaN;
+}
+
 export function writeLeave(tenantSlug: string, instructorId: string, input: LeaveInput, now: Date): LeaveResult {
   const t = instructorState(tenantSlug, instructorId, now);
   const fieldErrors: Record<string, string> = {};
-  const start = Date.parse(input.start);
-  const end = Date.parse(input.end);
+  const start = isoInstant(input.start);
+  const end = isoInstant(input.end);
   const todayStart = parisDateTime(dayKey(now.toISOString()), 0).getTime();
   if (Number.isNaN(start)) fieldErrors.start = "Indiquez la date et l'heure de début.";
   else if (start < todayStart) fieldErrors.start = "Le début ne peut pas être avant aujourd'hui.";

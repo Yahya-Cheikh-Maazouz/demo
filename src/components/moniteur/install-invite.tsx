@@ -42,6 +42,8 @@ export function InstallInvite() {
     } catch {
       // Storage blocked: the invitation comes back next time, nothing else depends on it.
     }
+    // The focused button leaves with the invitation: move the focus to the content, not <body>.
+    requestAnimationFrame(() => document.getElementById("contenu")?.focus());
   };
 
   return (
@@ -50,10 +52,11 @@ export function InstallInvite() {
         <SquarePlus className="size-5" aria-hidden />
       </span>
       <div className="min-w-0 flex-1 text-sm">
-        <p className="font-semibold text-ink">Installez l&apos;app sur votre iPhone</p>
+        <p className="font-semibold text-ink">Ouvrez l&apos;Espace moniteur comme une app</p>
         <p className="mt-0.5 text-ink-muted">
           Installez l&apos;app : Partager <Share className="inline size-4 align-[-3px] text-brand" aria-label="(icône Partager)" /> puis
-          « Sur l&apos;écran d&apos;accueil ». Vous recevrez les notifications et votre journée restera disponible hors connexion.
+          « Sur l&apos;écran d&apos;accueil ». Elle s&apos;ouvre alors en plein écran, et votre journée reste disponible hors
+          connexion.
         </p>
       </div>
       <button

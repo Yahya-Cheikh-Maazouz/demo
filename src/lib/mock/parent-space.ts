@@ -1,10 +1,10 @@
 // Mock of the backend for the parent space (legal guardian of a minor student): children linked to
 // the account, authorisations, validations proposed by the school, payment of the child's plan.
 // Pages go through src/lib/api/parent.ts, never this file. The API layer checks the session; this
-// module checks the link between the parent and the child on every call.
+// module checks the link between the parent and the child on every call. Reads never write: the
+// demo data is seeded with the school's state (guardian.ts), decisions are written by mutations.
 
-import { formatCurrency } from "@/lib/format";
-import { parisTime, parisWeekday, parisWeekKey } from "@/lib/paris-time";
+import { parisTime } from "@/lib/paris-time";
 import type {
   ActionResult,
   ChildAuthorisations,
@@ -19,12 +19,12 @@ import type {
   GuardianValidation,
   Installment,
   Invoice,
-  Lesson,
   ParentAccount,
   PaymentMethod,
   RequiredDocument,
 } from "@/lib/types";
-import { GUARDIANS, USERS } from "./data";
+import { GUARDIANS } from "./data";
+import { CONSENT_KEYS, REQUIRED_CONSENTS, ensureGuardian, guardianOf, type GuardianRecord } from "./guardian";
 import {
   ageAt,
   computeBalance,
@@ -33,36 +33,27 @@ import {
   logAudit,
   recordPayment,
   tenantState,
-  writeCreateLesson,
   type StudentRecord,
   type TenantState,
 } from "./store";
 import { readLivretFor } from "./student-space";
 
-type GuardianRecord = NonNullable<StudentRecord["guardian"]>;
-
-/** Display order of the authorisations. */
-export const CONSENT_KEYS: ConsentKey[] = ["photos", "contact_telephone", "rgpd", "communications"];
-const REQUIRED_CONSENTS: ConsentKey[] = ["rgpd"];
-/** Given at enrolment, on the paper file signed by the legal guardian. */
-const SEEDED_CONSENTS: ConsentKey[] = ["rgpd", "communications"];
-
-/** Formula proposed to minors in accompanied driving (AAC) who are still on another one. */
-const AAC_PACKAGE_ID = "pkg-aac";
-
 const NOT_FOUND = { ok: false as const, code: "introuvable", error: "Cet élève n'est pas rattaché à votre compte." };
+
+/** How each decision reads in the school's journal. */
+const CONSENT_AUDIT_LABEL: Record<ConsentKey, string> = {
+  photos: "photos et vidéos pendant les leçons",
+  contact_telephone: "contact téléphonique direct par le moniteur",
+  rgpd: "consentement RGPD",
+  communications: "communications par e-mail et SMS",
+};
 
 // ---------------------------------------------------------------------------
 // Parent account (deletion request), kept apart from the school's state
 
 type AccountRecord = { deletionRequestedAt?: string };
-const globalStore = globalThis as unknown as {
-  __aeParentAccounts?: Map<string, AccountRecord>;
-  __aeParentRequestSeeded?: WeakSet<StudentRecord>;
-};
+const globalStore = globalThis as unknown as { __aeParentAccounts?: Map<string, AccountRecord> };
 const accounts = (globalStore.__aeParentAccounts ??= new Map<string, AccountRecord>());
-/** Children whose pending lesson request was seeded (keyed by record: a new demo state seeds again). */
-const requestSeeded = (globalStore.__aeParentRequestSeeded ??= new WeakSet<StudentRecord>());
 
 function parentOf(parentId: string) {
   const user = findUserById(parentId);
@@ -73,13 +64,28 @@ function parentOf(parentId: string) {
 // ---------------------------------------------------------------------------
 // Link between the parent and the children
 
-/** Children of the parent that exist in the parent's own school (never another school's). */
+/**
+ * Children of the parent in the parent's own school (never another school's). The link of the
+ * account (GUARDIANS) only counts while the school's file agrees: a minor, not archived, whose
+ * legal guardian is this parent (same e-mail). A guardian removed or changed in the file, an
+ * archived file or a child who came of age closes the access.
+ */
 function childrenOf(parentId: string, now: Date): { t: TenantState; records: StudentRecord[] } {
   const parent = parentOf(parentId);
   const t = tenantState(parent.tenantSlug, now);
+  const email = parent.email.trim().toLowerCase();
   const records = (GUARDIANS[parentId] ?? [])
     .map((id) => t.students.get(id))
-    .filter((s): s is StudentRecord => Boolean(s));
+    .filter((s): s is StudentRecord => {
+      if (!s) return false;
+      const p = s.profile;
+      return (
+        !p.archived &&
+        p.isMinor &&
+        ageAt(p.birthDate, now) < 18 &&
+        p.legalGuardian?.email.trim().toLowerCase() === email
+      );
+    });
   return { t, records };
 }
 
@@ -90,13 +96,7 @@ function childrenOf(parentId: string, now: Date): { t: TenantState; records: Stu
 function findChild(parentId: string, childId: string | null, now: Date): { t: TenantState; s: StudentRecord } | null {
   const { t, records } = childrenOf(parentId, now);
   const s = childId === null ? records[0] : records.find((r) => r.profile.id === childId);
-  if (!s) return null;
-  ensureGuardian(t, s, parentId, now);
-  if (!requestSeeded.has(s)) {
-    requestSeeded.add(s);
-    seedPendingRequest(t, s, now);
-  }
-  return { t, s };
+  return s ? { t, s } : null;
 }
 
 function childView(s: StudentRecord, now: Date): GuardianChild {
@@ -110,114 +110,6 @@ function childView(s: StudentRecord, now: Date): GuardianChild {
     office: p.office,
     referentInstructor: p.referentInstructor,
   };
-}
-
-// ---------------------------------------------------------------------------
-// Seed (once per child, on first read)
-
-function ensureGuardian(t: TenantState, s: StudentRecord, parentId: string, now: Date): GuardianRecord {
-  if (s.guardian) return s.guardian;
-  const parentName = fullName(parentOf(parentId));
-  const enrolledAt = s.profile.enrolledAt;
-
-  const consents: GuardianRecord["consents"] = {};
-  for (const key of SEEDED_CONSENTS) consents[key] = { granted: true, decidedAt: enrolledAt, decidedBy: parentName };
-
-  const validations: GuardianRecord["validations"] = [];
-  const aac = t.settings.pricing.packages.find((p) => p.id === AAC_PACKAGE_ID && p.active);
-  if (aac && s.profile.licence.includes("AAC") && s.package.id !== aac.id) {
-    const gerant = USERS.find((u) => u.tenantSlug === t.slug && u.role === "gerant");
-    const difference = aac.price - s.package.price;
-    validations.push({
-      id: `val-${s.profile.id}-formule`,
-      kind: "changement_formule",
-      title: `Changement de formule : ${aac.name} (${formatCurrency(aac.price, { round: true })})`,
-      description:
-        `${s.profile.firstName} est en conduite accompagnée : l'auto-école propose de remplacer le ${s.package.name} ` +
-        `(${formatCurrency(s.package.price, { round: true })}) par le ${aac.name}. ${aac.description}` +
-        (difference > 0
-          ? ` La différence de ${formatCurrency(difference, { round: true })} sera répartie sur les prochaines échéances.`
-          : ""),
-      proposedAt: parisTime(now, -2, 10, 30).toISOString(),
-      proposedBy: gerant ? fullName(gerant) : "Votre auto-école",
-      status: "en_attente",
-      decidedAt: null,
-      decidedBy: null,
-      packageId: aac.id,
-    });
-  }
-
-  // A child paying in instalments: the package in three payments, the first one already paid.
-  let planSeeded = false;
-  if (s.installments.length === 0) {
-    const price = s.package.price;
-    const third = Math.floor(price / 3);
-    const amounts = [price - 2 * third, third, third];
-    const hours = [Math.ceil(s.package.hours / 3), Math.ceil(s.package.hours / 3)];
-    hours.push(s.package.hours - hours[0] - hours[1]);
-    const dueAt = [enrolledAt, parisTime(now, 6, 12).toISOString(), parisTime(now, 36, 12).toISOString()];
-    const labels = ["1ᵉʳ versement", "2ᵉ versement", "3ᵉ versement"];
-    s.installments = labels.map((label, i) => ({
-      id: `${s.profile.id}-ech-${i + 1}`,
-      label,
-      amount: amounts[i],
-      hours: hours[i],
-      dueAt: dueAt[i],
-      status: i === 0 ? ("payee" as const) : ("a_venir" as const),
-    }));
-    planSeeded = true;
-  }
-
-  s.guardian = { consents, validations, planSeeded };
-  return s.guardian;
-}
-
-const ACTIVE_STATUSES: Lesson["status"][] = ["a_confirmer", "confirme", "attente_paiement"];
-const REQUEST_HOURS = [14, 10, 16];
-
-/**
- * The generated timetable only holds confirmed, done and cancelled lessons. A minor asks for lessons
- * from the student space too: seed one request waiting for the referent instructor (as the
- * scripted students have), on a free slot that respects the school's weekly quota.
- */
-function seedPendingRequest(t: TenantState, s: StudentRecord, now: Date) {
-  const nowIso = now.toISOString();
-  const id = s.profile.id;
-  const mine = t.lessons.filter((l) => l.studentId === id);
-  if (mine.some((l) => l.status === "a_confirmer" && l.start > nowIso)) return;
-  const rules = t.settings.rules.booking;
-  const duration = 2;
-
-  for (let day = 3; day <= 20; day++) {
-    const weekday = parisWeekday(now, day);
-    if (weekday === 0 || weekday === 6) continue;
-    const week = parisWeekKey(parisTime(now, day, 12));
-    const booked = mine.filter(
-      (l) => (l.type === "conduite" || l.type === "code") && ACTIVE_STATUSES.includes(l.status) && parisWeekKey(new Date(l.start)) === week,
-    );
-    const bookedHours = booked.reduce((sum, l) => sum + l.durationHours, 0);
-    if (booked.length + 1 > rules.maxLessonsPerWeek || bookedHours + duration > rules.maxHoursPerWeek) continue;
-
-    for (const hour of REQUEST_HOURS) {
-      // Same checks as a booking by the agency (instructor, vehicle, leave, the child's own lessons).
-      const created = writeCreateLesson(
-        t.slug,
-        {
-          studentId: id,
-          type: "conduite",
-          instructorId: s.profile.referentInstructor.id,
-          vehicleId: "auto",
-          start: parisTime(now, day, hour).toISOString(),
-          durationHours: duration,
-        },
-        now,
-      );
-      if (created.ok) {
-        created.data.lesson.status = "a_confirmer";
-        return;
-      }
-    }
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +129,7 @@ function consentsOf(g: GuardianRecord): Consent[] {
 }
 
 function publicValidation(v: GuardianRecord["validations"][number]): GuardianValidation {
+  // `offer` (the frozen formula) stays on the server.
   const { id, kind, title, description, proposedAt, proposedBy, status, decidedAt, decidedBy } = v;
   return { id, kind, title, description, proposedAt, proposedBy, status, decidedAt, decidedBy };
 }
@@ -293,7 +186,7 @@ export function readChildOverview(parentId: string, childId: string | null, now:
   const found = findChild(parentId, childId, now);
   if (!found) return null;
   const { t, s } = found;
-  const g = s.guardian!;
+  const g = guardianOf(s);
   const { upcoming } = lessonsOf(t, s, now);
   const livret = readLivretFor(t.slug, s.profile.id, now)!;
   const documents = s.requiredDocuments;
@@ -354,7 +247,7 @@ export function readChildDocuments(parentId: string, childId: string | null, now
 export function readChildAuthorisations(parentId: string, childId: string | null, now: Date): ChildAuthorisations | null {
   const found = findChild(parentId, childId, now);
   if (!found) return null;
-  const g = found.s.guardian!;
+  const g = guardianOf(found.s);
   return { now: now.toISOString(), child: childView(found.s, now), consents: consentsOf(g), validations: validationsOf(g) };
 }
 
@@ -372,25 +265,23 @@ export function writeConsent(
   if (!found) return NOT_FOUND;
   if (!CONSENT_KEYS.includes(key)) return { ok: false, code: "invalide", error: "Autorisation inconnue." };
   const { t, s } = found;
-  const g = s.guardian!;
+  const g = ensureGuardian(s);
   const author = fullName(parentOf(parentId));
   const previous = g.consents[key];
   g.consents[key] = { granted, decidedAt: now.toISOString(), decidedBy: author };
-  if (key === "rgpd" && previous?.granted !== granted) {
-    logAudit(
-      t,
-      author,
-      "eleves",
-      `${fullName(s.profile)} : consentement RGPD ${granted ? "donné" : "retiré"} par le représentant légal`,
-      now,
-    );
+  // Every decision reaches the school's journal, where the staff sees it.
+  if (previous?.granted !== granted) {
+    const verb = granted ? "accordé" : previous?.granted ? "retiré" : "refusé";
+    logAudit(t, author, "eleves", `${fullName(s.profile)} : ${CONSENT_AUDIT_LABEL[key]} ${verb} par le représentant légal`, now);
   }
   return { ok: true, data: { consent: consentsOf(g).find((c) => c.key === key)! } };
 }
 
 /**
- * Accepts or refuses an item proposed by the school. Accepting a change of formula applies it:
- * the price difference is spread over the unpaid instalments (or added as a new one).
+ * Accepts or refuses an item proposed by the school. Accepting a change of formula applies the
+ * formula as it was proposed (price and hours frozen then); a higher price adds a complement to
+ * the payment plan. Codes "deja_traitee", "formule_modifiee" (the school changed or withdrew the
+ * offer since: it has to send a new proposal).
  */
 export function writeValidationDecision(
   parentId: string,
@@ -402,7 +293,7 @@ export function writeValidationDecision(
   const found = findChild(parentId, childId, now);
   if (!found) return NOT_FOUND;
   const { t, s } = found;
-  const validation = s.guardian!.validations.find((v) => v.id === validationId);
+  const validation = guardianOf(s).validations.find((v) => v.id === validationId);
   if (!validation) return { ok: false, code: "introuvable", error: "Cette demande n'existe plus." };
   if (validation.status !== "en_attente") {
     return { ok: false, code: "deja_traitee", error: "Cette demande a déjà été traitée." };
@@ -410,24 +301,24 @@ export function writeValidationDecision(
   const author = fullName(parentOf(parentId));
 
   if (decision === "accepte" && validation.kind === "changement_formule") {
-    const offer = t.settings.pricing.packages.find((p) => p.id === validation.packageId && p.active);
-    if (!offer) {
-      return { ok: false, code: "formule_retiree", error: "Cette formule n'est plus proposée. Contactez votre auto-école." };
+    const proposed = validation.offer;
+    const current = proposed && t.settings.pricing.packages.find((p) => p.id === proposed.id && p.active);
+    if (!proposed || !current || current.price !== proposed.price || current.hours !== proposed.hours) {
+      return {
+        ok: false,
+        code: "formule_modifiee",
+        error: "L'auto-école a modifié ou retiré cette formule depuis sa proposition. Elle doit vous en envoyer une nouvelle : contactez-la.",
+      };
     }
-    const difference = offer.price - s.package.price;
-    s.package = { id: offer.id, name: offer.name, hours: offer.hours, price: offer.price };
-    const unpaid = s.installments.filter((i) => i.status !== "payee").sort((a, b) => a.dueAt.localeCompare(b.dueAt));
-    if (difference !== 0 && unpaid.length > 0) {
-      const share = Math.floor(difference / unpaid.length);
-      unpaid.forEach((i, index) => {
-        i.amount += index === 0 ? difference - share * (unpaid.length - 1) : share;
-      });
-    } else if (difference > 0) {
+    const previous = s.package;
+    s.package = { ...proposed };
+    const difference = proposed.price - previous.price;
+    if (difference > 0) {
       s.installments.push({
         id: `${s.profile.id}-ech-${s.installments.length + 1}`,
-        label: "Complément de formule",
+        label: `Complément · ${proposed.name}`,
         amount: difference,
-        hours: 0,
+        hours: Math.max(0, proposed.hours - previous.hours),
         dueAt: parisTime(now, 30, 12).toISOString(),
         status: "a_venir",
       });
@@ -467,7 +358,9 @@ export function writePayChildInstallment(
     return { ok: false, code: "ordre", error: "Réglez d'abord l'échéance la plus ancienne." };
   }
   installment.status = "payee";
-  const invoice = recordPayment(t, s.profile.id, now, `${s.package.name} · ${installment.label}`, installment.amount, installment.hours, method);
+  // Plan labels name what is paid ("Forfait B — 20 h · 2ᵉ versement", "Pack 10 heures · …").
+  const label = installment.label.includes(" · ") ? installment.label : `${s.package.name} · ${installment.label}`;
+  const invoice = recordPayment(t, s.profile.id, now, label, installment.amount, installment.hours, method);
   return { ok: true, data: { invoice, hours: installment.hours } };
 }
 

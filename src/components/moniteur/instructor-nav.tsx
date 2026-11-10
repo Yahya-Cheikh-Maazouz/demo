@@ -81,7 +81,7 @@ function NavGroups({
     <div className="space-y-5">
       {NAV_GROUPS.map((group) => (
         <div key={group.label}>
-          <p className={cn("px-3 pb-2 text-[10px] font-bold tracking-[0.16em] uppercase", dark ? "text-white/45" : "text-ink-subtle")}>
+          <p className={cn("px-3 pb-2 text-[10px] font-bold tracking-[0.16em] uppercase", dark ? "text-white/60" : "text-ink-muted")}>
             {group.label}
           </p>
           <ul className="space-y-0.5">
@@ -142,7 +142,8 @@ function TabBarItems({ active, pending, menu }: { active: string | null; pending
             <Link
               href={href}
               aria-current={current ? "page" : undefined}
-              aria-label={short !== label || count > 0 ? `${label}${countLabel(count)}` : undefined}
+              // The visible word comes first (WCAG 2.5.3): "Indispos : indisponibilités".
+              aria-label={short !== label || count > 0 ? `${short}${short !== label ? ` : ${label.toLowerCase()}` : ""}${countLabel(count)}` : undefined}
               className={cn(
                 "flex min-h-16 flex-col items-center justify-center gap-1 pt-2 pb-1.5 text-[11px] font-semibold transition-colors",
                 current ? "text-brand" : "text-ink-subtle hover:text-ink",

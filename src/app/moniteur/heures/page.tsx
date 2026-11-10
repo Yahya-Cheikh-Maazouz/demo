@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { PageHeader } from "@/components/ui/page-header";
 import { HoursSummary, HoursSummarySkeleton } from "@/features/moniteur/hours-summary";
+import { PlanningAccess } from "@/features/moniteur/planning-access";
 
 export const metadata: Metadata = {
   title: "Mes heures",
@@ -13,7 +14,9 @@ export default function InstructorHoursPage() {
     <>
       <PageHeader eyebrow="Mes heures" title="Mon activité" description="Vos heures de leçons effectuées et celles qui restent cette semaine." />
       <Suspense fallback={<HoursSummarySkeleton />}>
-        <HoursSummary />
+        <PlanningAccess>
+          <HoursSummary />
+        </PlanningAccess>
       </Suspense>
     </>
   );

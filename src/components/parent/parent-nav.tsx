@@ -56,18 +56,31 @@ function activeHrefOf(pathname: string): string | null {
   return match?.href ?? null;
 }
 
-/** Path and child of the current URL. Only call it inside <Suspense> (or after an interaction). */
-function useLocation() {
+/**
+ * Path and child of the current URL. The child is kept in the links only when it is one of the
+ * parent's children (`linked`): a stale or forged ?enfant= is not spread to every section.
+ * Only call it inside <Suspense> (or after an interaction).
+ */
+function useLocation(linked: string[]) {
   const pathname = usePathname();
-  const child = useSearchParams().get(CHILD_PARAM);
-  return { active: activeHrefOf(pathname), child: child || null };
+  const asked = useSearchParams().get(CHILD_PARAM);
+  return { active: activeHrefOf(pathname), child: asked && linked.includes(asked) ? asked : null };
 }
 
 type Variant = "sidebar" | "sheet";
 
 /** Grouped navigation: the dark sidebar on desktop, or the content of the mobile "Menu" sheet. */
-export function ParentNav({ variant, onNavigate }: { variant: Variant; onNavigate?: () => void }) {
-  const { active, child } = useLocation();
+export function ParentNav({
+  variant,
+  linked,
+  onNavigate,
+}: {
+  variant: Variant;
+  /** Ids of the children linked to the account. */
+  linked: string[];
+  onNavigate?: () => void;
+}) {
+  const { active, child } = useLocation(linked);
   return <NavGroups variant={variant} active={active} child={child} onNavigate={onNavigate} />;
 }
 
@@ -139,8 +152,8 @@ function NavGroups({
 }
 
 /** Mobile bottom tab bar (4 destinations); the 5th cell is the "Menu" button passed as `menu`. */
-export function ParentTabBar({ menu }: { menu: ReactNode }) {
-  const { active, child } = useLocation();
+export function ParentTabBar({ menu, linked }: { menu: ReactNode; linked: string[] }) {
+  const { active, child } = useLocation(linked);
   return <TabBarItems active={active} child={child} menu={menu} />;
 }
 

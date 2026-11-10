@@ -31,7 +31,7 @@ export const CONSENT_META: Record<ConsentKey, ConsentMeta> = {
     label: "Contact téléphonique direct par le moniteur",
     icon: Phone,
     description: (name) =>
-      `Le moniteur peut appeler ou écrire directement à ${name} (retard, point de rendez-vous). Sans cet accord, il passe par vous.`,
+      `Le moniteur peut appeler ou écrire directement à ${name} (retard, point de rendez-vous). Sans cet accord, le numéro de ${name} ne lui est pas communiqué : il passe par vous.`,
   },
   rgpd: {
     label: "Traitement des données personnelles (RGPD)",

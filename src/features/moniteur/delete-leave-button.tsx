@@ -10,6 +10,7 @@ import { useOnline } from "@/components/moniteur/use-online";
 import { INITIAL_INSTRUCTOR_STATE, type InstructorActionState } from "./action-state";
 import { deleteLeaveAction } from "./actions";
 import { useInstructorFeedback } from "./feedback";
+import { guardNetwork } from "./network-guard";
 import { OnlineSubmitButton } from "./online-submit-button";
 
 /** Deletes a leave the instructor declared, after a confirmation. */
@@ -44,15 +45,18 @@ export function DeleteLeaveButton({ leaveId, summary }: { leaveId: string; summa
 function DeleteLeaveForm({ leaveId, onCancel, onDone }: { leaveId: string; onCancel: () => void; onDone: () => void }) {
   const { announce } = useInstructorFeedback();
   const errorRef = useRef<HTMLDivElement>(null);
-  const [state, formAction] = useActionState(async (prev: InstructorActionState, formData: FormData) => {
-    const next = await deleteLeaveAction(prev, formData);
-    if (next.status === "success") {
-      onDone();
-      announce(next.message ?? "Indisponibilité supprimée.");
-      refreshOfflineCopy();
-    }
-    return next;
-  }, INITIAL_INSTRUCTOR_STATE);
+  const [state, formAction] = useActionState(
+    guardNetwork(async (prev: InstructorActionState, formData: FormData) => {
+      const next = await deleteLeaveAction(prev, formData);
+      if (next.status === "success") {
+        onDone();
+        announce(next.message ?? "Indisponibilité supprimée.");
+        refreshOfflineCopy();
+      }
+      return next;
+    }),
+    INITIAL_INSTRUCTOR_STATE,
+  );
   useEffect(() => {
     if (state.status === "error") errorRef.current?.focus();
   }, [state]);

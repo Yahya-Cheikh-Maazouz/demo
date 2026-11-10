@@ -9,6 +9,7 @@ import {
   LeavesList,
   LeavesListSkeleton,
 } from "@/features/moniteur/leaves-section";
+import { PlanningAccess } from "@/features/moniteur/planning-access";
 
 export const metadata: Metadata = {
   title: "Indisponibilités",
@@ -26,7 +27,9 @@ export default function InstructorLeavesPage() {
       <div className="space-y-8">
         <LeaveFormCard>
           <Suspense fallback={<LeaveFormSkeleton />}>
-            <LeaveFormSection />
+            <PlanningAccess>
+              <LeaveFormSection />
+            </PlanningAccess>
           </Suspense>
         </LeaveFormCard>
 
@@ -37,7 +40,9 @@ export default function InstructorLeavesPage() {
           <InstructorFeedbackProvider>
             <InstructorFeedbackRegion />
             <Suspense fallback={<LeavesListSkeleton />}>
-              <LeavesList />
+              <PlanningAccess denied={null}>
+                <LeavesList />
+              </PlanningAccess>
             </Suspense>
           </InstructorFeedbackProvider>
         </section>

@@ -11,6 +11,7 @@ import { cn } from "@/lib/cn";
 import { formatDateLong, formatDayOfMonth, formatHours, formatRelativeDay, formatTime, formatTimeRange, formatWeekdayShort } from "@/lib/format";
 import { addDays, parisDateTime } from "@/lib/paris-time";
 import type { InstructorLeave, InstructorLesson } from "@/lib/types";
+import { guillemets } from "./french";
 import { InstructorLessonCard } from "./lesson-card";
 import { dayHref, isToSign } from "./lesson-status";
 
@@ -39,13 +40,11 @@ function DayNav({ date, today }: { date: string; today: string }) {
   const cell = "h-12 rounded-2xl px-2 text-sm";
   return (
     <nav aria-label="Changer de jour" className="mb-6 grid grid-cols-3 gap-2">
-      <Link
-        href={dayHref(previous, today)}
-        className={buttonStyles({ variant: "secondary", className: cell })}
-        aria-label={`Jour précédent : ${formatDateLong(middayOf(previous))}`}
-      >
+      {/* The visible "Jeu. 5" starts the accessible name (WCAG 2.5.3), the full date follows. */}
+      <Link href={dayHref(previous, today)} className={buttonStyles({ variant: "secondary", className: cell })}>
         <ChevronLeft className="size-5 shrink-0" aria-hidden />
         {shortDay(previous)}
+        <span className="sr-only">, jour précédent : {formatDateLong(middayOf(previous)).toLowerCase()}</span>
       </Link>
       <Link
         href="/moniteur"
@@ -57,12 +56,9 @@ function DayNav({ date, today }: { date: string; today: string }) {
       >
         Aujourd&apos;hui
       </Link>
-      <Link
-        href={dayHref(next, today)}
-        className={buttonStyles({ variant: "secondary", className: cell })}
-        aria-label={`Jour suivant : ${formatDateLong(middayOf(next))}`}
-      >
+      <Link href={dayHref(next, today)} className={buttonStyles({ variant: "secondary", className: cell })}>
         {shortDay(next)}
+        <span className="sr-only">, jour suivant : {formatDateLong(middayOf(next)).toLowerCase()}</span>
         <ChevronRight className="size-5 shrink-0" aria-hidden />
       </Link>
     </nav>
@@ -104,7 +100,7 @@ function ToClose({ lessons, today }: { lessons: InstructorLesson[]; today: strin
       <h2 className="mt-1.5 text-lg font-extrabold tracking-[-0.02em] text-ink">
         {lessons.length > 1 ? `${lessons.length} leçons attendent l'émargement` : "Une leçon attend l'émargement"}
       </h2>
-      <ul className="mt-3 divide-y divide-line">
+      <ul aria-label="Leçons à clôturer" className="mt-3 divide-y divide-line">
         {lessons.map((lesson) => (
           <li key={lesson.id}>
             <Link
@@ -130,9 +126,22 @@ function ToClose({ lessons, today }: { lessons: InstructorLesson[]; today: strin
   );
 }
 
+/** "2 annulées", "1 absence", "1 annulée et 1 absence": lessons of the day that will not take place. */
+function offLabel(lessons: InstructorLesson[]): string {
+  const absent = lessons.filter((l) => l.status === "annule" && l.noShow).length;
+  const cancelled = lessons.filter((l) => l.status === "annule" && !l.noShow).length;
+  const parts = [
+    cancelled > 0 ? `${cancelled} ${cancelled > 1 ? "annulées" : "annulée"}` : "",
+    absent > 0 ? `${absent} ${absent > 1 ? "absences" : "absence"}` : "",
+  ].filter(Boolean);
+  return parts.join(" et ");
+}
+
 function summaryOf(lessons: InstructorLesson[], now: string): string {
   const active = lessons.filter((l) => l.status !== "annule");
-  if (active.length === 0) return "Aucune leçon prévue ce jour-là.";
+  if (active.length === 0) {
+    return lessons.length > 0 ? `Aucune leçon à assurer · ${offLabel(lessons)}.` : "Aucune leçon prévue ce jour-là.";
+  }
   const hours = active.reduce((sum, l) => sum + l.durationHours, 0);
   const toSign = active.filter((l) => isToSign(l, now)).length;
   const base = `${active.length} ${active.length > 1 ? "leçons" : "leçon"} · ${formatHours(hours)}`;
@@ -170,7 +179,7 @@ export async function DayView({ date }: { date: string | null }) {
           <EmptyState
             icon={day.leaves.length > 0 ? Coffee : CalendarCheck2}
             title={day.leaves.length > 0 ? "Pas de leçon : vous êtes indisponible" : "Aucune leçon ce jour-là"}
-            description="Les demandes des élèves arrivent dans « Demandes » : une fois confirmées, elles apparaissent ici."
+            description={`Les demandes des élèves arrivent dans ${guillemets("Demandes")} : une fois confirmées, elles apparaissent ici.`}
             action={
               <Link href="/moniteur/demandes" className={buttonStyles({ variant: "secondary", size: "lg" })}>
                 Voir les demandes

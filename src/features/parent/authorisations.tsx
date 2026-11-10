@@ -2,7 +2,7 @@ import { ListChecks, ShieldCheck } from "lucide-react";
 import { Card, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadingLabel, Skeleton } from "@/components/ui/skeleton";
-import { ChildNotFound, NOT_FOUND_TITLE } from "./child-not-found";
+import { MissingChild, missingChildTitle } from "./child-not-found";
 import { ConsentRow } from "./consent-row";
 import { getPageAuthorisations } from "./data";
 import { ValidationItem } from "./validation-item";
@@ -10,13 +10,13 @@ import { ValidationItem } from "./validation-item";
 /** "Les autorisations de Léa". Render inside <Suspense>. */
 export async function AuthorisationsTitle({ child }: { child: string | null }) {
   const data = await getPageAuthorisations(child);
-  return <>{data ? `Les autorisations de ${data.child.firstName}` : NOT_FOUND_TITLE}</>;
+  return <>{data ? `Les autorisations de ${data.child.firstName}` : await missingChildTitle()}</>;
 }
 
 /** Proposals to validate, then the authorisations given by the parent. Render inside <Suspense>. */
 export async function AuthorisationsContent({ child }: { child: string | null }) {
   const data = await getPageAuthorisations(child);
-  if (!data) return <ChildNotFound />;
+  if (!data) return <MissingChild />;
   const { child: kid, consents, validations } = data;
   const pending = validations.filter((v) => v.status === "en_attente");
   const decided = validations.filter((v) => v.status !== "en_attente");

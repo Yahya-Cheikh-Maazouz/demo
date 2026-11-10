@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { ForgetOfflinePages } from "@/components/moniteur/forget-offline-pages";
 import { PageHeader } from "@/components/ui/page-header";
 import { FormSkeleton } from "@/features/auth/auth-skeletons";
 import { LoginForm, type LoginNotice } from "@/features/auth/login-form";
@@ -44,6 +45,8 @@ async function LoginSection({ searchParams }: Pick<PageProps<"/connexion">, "sea
 export default function LoginPage({ searchParams }: PageProps<"/connexion">) {
   return (
     <RequireTenant>
+      {/* Every sign-out and lost session lands here: the instructor pages saved offline go away. */}
+      <ForgetOfflinePages />
       <PageHeader title="Connexion" description="Connectez-vous pour accéder à votre espace." />
       <Suspense fallback={<FormSkeleton />}>
         <LoginSection searchParams={searchParams} />

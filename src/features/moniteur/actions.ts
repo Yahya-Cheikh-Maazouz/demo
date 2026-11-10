@@ -14,10 +14,13 @@ import { formatDateLong, formatTime } from "@/lib/format";
 import { parisDateTime } from "@/lib/paris-time";
 import type { LeaveReason } from "@/lib/types";
 import { LIVRET_NOTE_MAX, type InstructorActionState, type LeaveActionState, type LeaveField } from "./action-state";
+import { deName, guillemets } from "./french";
 
 // Ids are opaque to the UI: only check they look like ids before calling the API.
 const ID_PATTERN = /^[\w:.-]{1,160}$/;
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/** A competence level as posted by the livret form: a whole number, 0 to 100. */
+const LEVEL_PATTERN = /^\d{1,3}$/;
 const TIME_PATTERN = /^([01]\d|2[0-3]):[0-5]\d$/;
 const REASONS: LeaveReason[] = ["Congés", "Maladie", "Formation", "Autre"];
 /** Data URL of the drawn signature: 200 Ko once decoded, about 4/3 of that in base64. */
@@ -28,6 +31,14 @@ const NETWORK_ERROR = "Le serveur n'a pas répondu. Vérifiez votre connexion pu
 function readText(formData: FormData, name: string): string {
   const value = formData.get(name);
   return typeof value === "string" ? value : "";
+}
+
+/** "2026-11-12" naming a real calendar day ("2026-02-31" does not). */
+function isCalendarDay(value: string): boolean {
+  if (!DATE_PATTERN.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
 }
 
 /** "jeudi 12 novembre à 08:00", in the middle of a sentence. */
@@ -57,7 +68,7 @@ export async function reviewRequestAction(prev: InstructorActionState, formData:
   const { lesson } = result.data;
   const name = `${lesson.student.firstName} ${lesson.student.lastName}`;
   if (decision === "refuse") {
-    return { status: "success", message: `Demande de ${name} refusée : le créneau est libéré.`, attempt };
+    return { status: "success", message: `Demande ${deName(name)} refusée : le créneau est libéré.`, attempt };
   }
   return {
     status: "success",
@@ -65,7 +76,7 @@ export async function reviewRequestAction(prev: InstructorActionState, formData:
     message:
       lesson.status === "attente_paiement"
         ? `Leçon confirmée avec ${name}, ${when(lesson.start)}. Paiement à régulariser : l'élève doit passer à l'accueil avant la leçon.`
-        : `Leçon confirmée avec ${name}, ${when(lesson.start)}. L'élève la voit « Planifié ».`,
+        : `Leçon confirmée avec ${name}, ${when(lesson.start)}. L'élève la voit ${guillemets("Planifié")}.`,
     attempt,
   };
 }
@@ -125,38 +136,60 @@ export async function markAbsentAction(prev: InstructorActionState, formData: Fo
   }
   refresh();
   const { student } = result.data.lesson;
-  return { status: "success", message: `Absence de ${student.firstName} ${student.lastName} enregistrée. L'accueil en est informé.`, attempt };
+  return { status: "success", message: `Absence ${deName(`${student.firstName} ${student.lastName}`)} enregistrée. L'accueil en est informé.`, attempt };
+}
+
+const LIVRET_CODES = ["C1", "C2", "C3", "C4"];
+
+/** The 4 levels posted under `prefix` + code ("C1", or "avant-C1" for the baseline), or null if one is not a valid level. */
+function readLevels(formData: FormData, prefix = ""): number[] | null {
+  const raw = LIVRET_CODES.map((code) => readText(formData, `${prefix}${code}`));
+  if (raw.some((value) => !LEVEL_PATTERN.test(value))) return null;
+  const levels = raw.map(Number);
+  return levels.every((level) => level <= 100) ? levels : null;
 }
 
 /** C1–C4 levels and the optional comment after the lesson. */
 export async function updateLivretAction(prev: InstructorActionState, formData: FormData): Promise<InstructorActionState> {
   const attempt = (prev.attempt ?? 0) + 1;
   const lessonId = readText(formData, "lessonId");
-  const progress = ["C1", "C2", "C3", "C4"].map((code) => Number(readText(formData, code)));
+  const progress = readLevels(formData);
+  const baseline = readLevels(formData, "avant-");
   const note = readText(formData, "note").trim();
   if (!ID_PATTERN.test(lessonId)) {
     return { status: "error", code: "introuvable", message: "Cette leçon est introuvable.", attempt };
   }
-  if (progress.some((p) => !Number.isInteger(p) || p < 0 || p > 100)) {
+  if (!progress || !baseline) {
     return { status: "error", code: "invalide", message: "Les niveaux vont de 0 à 100 %.", attempt };
   }
   if (note.length > LIVRET_NOTE_MAX) {
     return { status: "error", code: "invalide", message: `Le retour fait ${LIVRET_NOTE_MAX} caractères au plus.`, attempt };
   }
+  const changed = progress.some((level, i) => level !== baseline[i]);
+  if (!changed && !note) {
+    return { status: "info", code: "inchange", message: "Rien à enregistrer : changez un niveau ou écrivez un retour.", attempt };
+  }
   let result: Awaited<ReturnType<typeof updateLessonLivret>>;
   try {
-    result = await updateLessonLivret(lessonId, { progress, note: note || null });
+    result = await updateLessonLivret(lessonId, { progress, baseline, note: note || null });
   } catch (error) {
     unstable_rethrow(error);
     return { status: "error", code: "reseau", message: NETWORK_ERROR, attempt };
   }
-  if (!result.ok) return { status: "error", code: result.code, message: result.error, attempt };
+  if (!result.ok) {
+    // Changed meanwhile: show the stored levels, the instructor checks them and saves again.
+    if (result.code === "modifie") refresh();
+    if (result.code === "inchange") return { status: "info", code: result.code, message: result.error, attempt };
+    return { status: "error", code: result.code, message: result.error, attempt };
+  }
   refresh();
-  return {
-    status: "success",
-    message: note ? "Livret et retour enregistrés : l'élève les voit dans son suivi." : "Livret enregistré : l'élève voit ses nouveaux niveaux.",
-    attempt,
-  };
+  const message =
+    changed && note
+      ? "Livret et retour enregistrés : l'élève et ses parents les voient dans leur suivi."
+      : changed
+        ? "Niveaux enregistrés : l'élève et ses parents les voient dans leur suivi."
+        : "Retour enregistré : l'élève et ses parents le lisent dans leur suivi.";
+  return { status: "success", message, attempt };
 }
 
 const LEAVE_FIELD_OF: Record<string, LeaveField> = { start: "startDate", end: "endDate", reason: "reason" };
@@ -171,9 +204,9 @@ export async function declareLeaveAction(prev: LeaveActionState, formData: FormD
   const reason = readText(formData, "reason") as LeaveReason;
 
   const fieldErrors: LeaveActionState["fieldErrors"] = {};
-  if (!DATE_PATTERN.test(startDate)) fieldErrors.startDate = "Indiquez le jour de début.";
+  if (!isCalendarDay(startDate)) fieldErrors.startDate = "Indiquez le jour de début.";
   if (!TIME_PATTERN.test(startTime)) fieldErrors.startTime = "Indiquez l'heure de début.";
-  if (!DATE_PATTERN.test(endDate)) fieldErrors.endDate = "Indiquez le jour de fin.";
+  if (!isCalendarDay(endDate)) fieldErrors.endDate = "Indiquez le jour de fin.";
   if (!TIME_PATTERN.test(endTime)) fieldErrors.endTime = "Indiquez l'heure de fin.";
   if (!REASONS.includes(reason)) fieldErrors.reason = "Choisissez un motif.";
   if (Object.keys(fieldErrors).length > 0) {
@@ -210,7 +243,7 @@ export async function declareLeaveAction(prev: LeaveActionState, formData: FormD
   const { leave } = result.data;
   return {
     status: "success",
-    message: `Indisponibilité enregistrée du ${when(leave.start)} au ${when(leave.end)}. Les élèves ne peuvent plus demander ces créneaux.`,
+    message: `Du ${when(leave.start)} au ${when(leave.end)}. Les élèves ne peuvent plus demander ces créneaux.`,
     attempt,
   };
 }

@@ -7,7 +7,7 @@ import { logout } from "@/features/auth/logout";
 import { ParentNav } from "./parent-nav";
 
 /** "Menu" cell of the mobile tab bar: opens every section of the parent space in a bottom sheet. */
-export function ParentMobileMenu() {
+export function ParentMobileMenu({ linked }: { linked: string[] }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -26,7 +26,7 @@ export function ParentMobileMenu() {
         {/* Mounted only while open: the closed menu is part of the static shell, where the URL is unknown. */}
         {open && (
           <nav aria-label="Toutes les rubriques">
-            <ParentNav variant="sheet" onNavigate={() => setOpen(false)} />
+            <ParentNav variant="sheet" linked={linked} onNavigate={() => setOpen(false)} />
           </nav>
         )}
         <form action={logout} className="mt-5 border-t border-line pt-4">

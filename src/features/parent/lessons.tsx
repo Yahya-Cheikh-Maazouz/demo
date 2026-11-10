@@ -15,14 +15,14 @@ import {
 } from "@/lib/format";
 import { getTenant } from "@/lib/tenant";
 import type { Lesson } from "@/lib/types";
-import { ChildNotFound, NOT_FOUND_TITLE } from "./child-not-found";
+import { MissingChild, missingChildTitle } from "./child-not-found";
 import { getPageLessons } from "./data";
 import { withChild } from "./query";
 
 /** "Le planning de Léa". Render inside <Suspense>. */
 export async function PlanningTitle({ child }: { child: string | null }) {
   const data = await getPageLessons(child);
-  return <>{data ? `Le planning de ${data.child.firstName}` : NOT_FOUND_TITLE}</>;
+  return <>{data ? `Le planning de ${data.child.firstName}` : await missingChildTitle()}</>;
 }
 
 /** The school's phone, next to the title: parents book or cancel through the secretariat. Render inside <Suspense>. */
@@ -122,7 +122,7 @@ function LessonRow({ lesson, upcoming, paymentsHref }: { lesson: Lesson; upcomin
 /** Upcoming lessons (requests included) and history, read-only. Render inside <Suspense>. */
 export async function PlanningContent({ child }: { child: string | null }) {
   const data = await getPageLessons(child);
-  if (!data) return <ChildNotFound />;
+  if (!data) return <MissingChild />;
   const { upcoming, history, child: kid } = data;
   const done = history.filter((l) => l.status === "effectue").length;
   const referent = kid.referentInstructor;

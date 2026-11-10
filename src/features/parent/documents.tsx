@@ -9,19 +9,19 @@ import { SchoolContactNote } from "@/features/profil/school-contact-note";
 import { cn } from "@/lib/cn";
 import { formatDate } from "@/lib/format";
 import type { RequiredDocument } from "@/lib/types";
-import { ChildNotFound, NOT_FOUND_TITLE } from "./child-not-found";
+import { MissingChild, missingChildTitle } from "./child-not-found";
 import { getPageDocuments } from "./data";
 
 /** "Le dossier de Léa". Render inside <Suspense>. */
 export async function DocumentsTitle({ child }: { child: string | null }) {
   const data = await getPageDocuments(child);
-  return <>{data ? `Le dossier de ${data.child.firstName}` : NOT_FOUND_TITLE}</>;
+  return <>{data ? `Le dossier de ${data.child.firstName}` : await missingChildTitle()}</>;
 }
 
 /** The pieces the school asks for, with their status. Read-only for the parent. Render inside <Suspense>. */
 export async function DocumentsContent({ child }: { child: string | null }) {
   const data = await getPageDocuments(child);
-  if (!data) return <ChildNotFound />;
+  if (!data) return <MissingChild />;
   const documents = byUrgency(data.documents);
   const total = documents.length;
   const validated = documents.filter((d) => d.status === "valide").length;
