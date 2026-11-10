@@ -19,12 +19,12 @@ const DIALOG: Record<Decision, { title: string; confirm: string; consequence: st
   accepte: {
     title: "Accepter cette proposition ?",
     confirm: "Confirmer mon accord",
-    consequence: "Votre accord est transmis à l'auto-école et appliqué au dossier. Il ne peut pas être annulé ici.",
+    consequence: "Votre accord est appliqué au dossier et visible par l'auto-école. Il ne peut pas être annulé ici.",
   },
   refuse: {
     title: "Refuser cette proposition ?",
     confirm: "Confirmer mon refus",
-    consequence: "L'auto-école est prévenue de votre refus ; rien ne change dans le dossier.",
+    consequence: "Votre refus est enregistré et visible par l'auto-école ; rien ne change dans le dossier.",
   },
 };
 
@@ -154,7 +154,7 @@ function DecisionForm({
 
       {state.status === "error" && (
         <div ref={errorRef} tabIndex={-1} className="mt-4 rounded-2xl outline-none">
-          <Alert key={state.attempt} tone="danger" role="alert" title="La décision n'a pas été envoyée">
+          <Alert key={state.attempt} tone="danger" role="alert" title="La décision n'a pas été enregistrée">
             {state.message}
           </Alert>
         </div>

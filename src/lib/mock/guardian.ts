@@ -2,15 +2,21 @@
 // what they mean for the rest of the school, and the demo data of the children followed by a
 // parent account.
 //
-// - Rule applied by the other spaces: no new lesson is planned while the guardian has withdrawn the
-//   RGPD consent. (The instructor space reads guardian.consents.contact_telephone itself.)
+// - Every space reads the decisions through guardianConsent() / guardianConsents() below, never
+//   StudentRecord.guardian directly: an authorisation applies only when it was given.
+// - What each one changes: "rgpd" withdrawn → no new lesson (trainingSuspension, store.ts);
+//   "contact_telephone" not given → the instructor gets the guardian's number, not the minor's
+//   (instructor-space.ts); "photos" and "communications" → shown to the staff in the student's file
+//   (parent-space.ts readGuardianDecisions), who apply them. Anything that sends reminders or
+//   information by e-mail or SMS on its own (an SMS outbox) must skip a minor and their guardian
+//   unless guardianConsent(s, "communications") is true.
 // - Seed: written once with the school's state (store.ts seedTenant), never from a read.
 //
 // This file only imports types from store.ts, so the store can call it without an import cycle.
 
 import { formatCurrency } from "@/lib/format";
 import { parisTime } from "@/lib/paris-time";
-import type { ConsentKey, Installment, PaymentMethod } from "@/lib/types";
+import type { Consent, ConsentKey, Installment, PaymentMethod } from "@/lib/types";
 import { GUARDIANS, USERS } from "./data";
 import type { StudentRecord, TenantState } from "./store";
 
@@ -48,6 +54,32 @@ export function ensureGuardian(s: StudentRecord): GuardianRecord {
 }
 
 // ---------------------------------------------------------------------------
+// Reading the decisions (every space)
+
+/**
+ * The legal guardian's decision on one authorisation of the student: true (given), false (refused
+ * or withdrawn), null (nobody decided yet, or no guardian decides for this student). An
+ * authorisation applies only when it is `true`.
+ */
+export function guardianConsent(s: StudentRecord | undefined, key: ConsentKey): boolean | null {
+  return s?.guardian?.consents[key]?.granted ?? null;
+}
+
+/** Every authorisation in display order, with the last decision (date, author) when there is one. */
+export function guardianConsents(s: StudentRecord): Consent[] {
+  return CONSENT_KEYS.map((key) => {
+    const decision = s.guardian?.consents[key];
+    return {
+      key,
+      granted: decision?.granted ?? false,
+      decidedAt: decision?.decidedAt ?? null,
+      decidedBy: decision?.decidedBy ?? null,
+      required: REQUIRED_CONSENTS.includes(key),
+    };
+  });
+}
+
+// ---------------------------------------------------------------------------
 // Rules applied by the other spaces
 
 /**
@@ -55,7 +87,7 @@ export function ensureGuardian(s: StudentRecord): GuardianRecord {
  * request) while the legal guardian has withdrawn the RGPD consent. Null: nothing blocks.
  */
 export function trainingSuspension(s: StudentRecord | undefined): { ok: false; code: string; error: string } | null {
-  if (!s || s.guardian?.consents.rgpd?.granted !== false) return null;
+  if (!s || guardianConsent(s, "rgpd") !== false) return null;
   return {
     ok: false,
     code: "formation_suspendue",

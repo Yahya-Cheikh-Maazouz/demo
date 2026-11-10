@@ -6,7 +6,7 @@
  * by <TenantTheme /> as --brand on :root.
  */
 @theme {
-  --font-sans: var(--font-archivo), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-bricolage), ui-sans-serif, system-ui, sans-serif;
 
   /* Neutrals tinted towards green, like the client's reference prototype. */
   --color-canvas: #f3f7f6;

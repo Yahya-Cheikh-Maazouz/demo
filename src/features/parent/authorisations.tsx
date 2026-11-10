@@ -33,7 +33,7 @@ export async function AuthorisationsContent({ child }: { child: string | null })
           <EmptyState
             icon={ListChecks}
             title="Rien à valider"
-            description="L'auto-école vous préviendra par e-mail si elle a besoin de votre accord."
+            description="Quand l'auto-école aura besoin de votre accord, sa proposition apparaîtra ici."
             className={decided.length > 0 ? "pt-8 pb-6" : "py-8"}
           />
         )}
@@ -50,7 +50,7 @@ export async function AuthorisationsContent({ child }: { child: string | null })
       <Card id="autorisations" className="scroll-mt-24">
         <CardHeader
           title="Autorisations"
-          description={`${kid.firstName} est mineur·e : c'est vous qui les donnez. Vous pouvez changer d'avis à tout moment.`}
+          description={`${kid.firstName} est mineur·e : c'est vous qui les donnez. Chaque réponse est datée et visible par l'auto-école dans le dossier de ${kid.firstName} ; vous pouvez changer d'avis ensuite.`}
           icon={<ShieldCheck className="size-5" aria-hidden />}
         />
         <ul className="mt-3 divide-y divide-line border-t border-line">

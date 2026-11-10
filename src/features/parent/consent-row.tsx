@@ -147,8 +147,8 @@ export function ConsentRow({ childId, firstName, consent }: { childId: string; f
 
             {refusedRequired && (
               <Alert tone="danger" icon={ShieldOff} className="mt-3" title="Formation suspendue">
-                Sans ce consentement, l&apos;auto-école ne peut plus traiter les données de {firstName} : aucune nouvelle
-                leçon ni aucun examen ne peut être planifié. Réactivez-le pour reprendre la formation.
+                Tant que ce consentement est retiré, aucune nouvelle leçon ni aucun examen ne peut être planifié pour{" "}
+                {firstName}. Redonnez-le pour reprendre la formation.
               </Alert>
             )}
 
@@ -172,7 +172,7 @@ export function ConsentRow({ childId, firstName, consent }: { childId: string; f
           open={confirmOpen}
           onClose={() => setConfirmOpen(false)}
           title="Retirer le consentement RGPD ?"
-          description={`Sans votre accord, l'auto-école ne peut plus traiter les données personnelles de ${firstName}.`}
+          description={`La formation de ${firstName} sera suspendue jusqu'à ce que vous redonniez votre accord.`}
           footer={
             <>
               <Button variant="secondary" onClick={() => setConfirmOpen(false)}>
@@ -202,7 +202,8 @@ export function ConsentRow({ childId, firstName, consent }: { childId: string; f
             <li className="flex gap-2">
               <span aria-hidden>•</span>
               <span>
-                Les leçons déjà planifiées restent prévues. L&apos;auto-école est prévenue et vous contactera pour en parler.
+                Les leçons déjà planifiées restent prévues. L&apos;auto-école voit votre retrait dans le dossier de{" "}
+                {firstName}.
               </span>
             </li>
             <li className="flex gap-2">
@@ -211,7 +212,7 @@ export function ConsentRow({ childId, firstName, consent }: { childId: string; f
             </li>
             <li className="flex gap-2">
               <span aria-hidden>•</span>
-              <span>Vous pourrez redonner votre accord à tout moment depuis cette page.</span>
+              <span>Vous pourrez redonner votre accord depuis cette page.</span>
             </li>
           </ul>
         </Dialog>

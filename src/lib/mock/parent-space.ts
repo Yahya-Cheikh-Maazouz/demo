@@ -16,6 +16,7 @@ import type {
   Consent,
   ConsentKey,
   GuardianChild,
+  GuardianDecisions,
   GuardianValidation,
   Installment,
   Invoice,
@@ -24,7 +25,7 @@ import type {
   RequiredDocument,
 } from "@/lib/types";
 import { GUARDIANS } from "./data";
-import { CONSENT_KEYS, REQUIRED_CONSENTS, ensureGuardian, guardianOf, type GuardianRecord } from "./guardian";
+import { CONSENT_KEYS, ensureGuardian, guardianConsents, guardianOf, type GuardianRecord } from "./guardian";
 import {
   ageAt,
   computeBalance,
@@ -61,6 +62,8 @@ function parentOf(parentId: string) {
   return user;
 }
 
+type ParentUser = ReturnType<typeof parentOf>;
+
 // ---------------------------------------------------------------------------
 // Link between the parent and the children
 
@@ -73,20 +76,21 @@ function parentOf(parentId: string) {
 function childrenOf(parentId: string, now: Date): { t: TenantState; records: StudentRecord[] } {
   const parent = parentOf(parentId);
   const t = tenantState(parent.tenantSlug, now);
-  const email = parent.email.trim().toLowerCase();
   const records = (GUARDIANS[parentId] ?? [])
     .map((id) => t.students.get(id))
-    .filter((s): s is StudentRecord => {
-      if (!s) return false;
-      const p = s.profile;
-      return (
-        !p.archived &&
-        p.isMinor &&
-        ageAt(p.birthDate, now) < 18 &&
-        p.legalGuardian?.email.trim().toLowerCase() === email
-      );
-    });
+    .filter((s): s is StudentRecord => s !== undefined && isLinked(parent, s, now));
   return { t, records };
+}
+
+/** The school's file agrees with the account's link (see childrenOf). */
+function isLinked(parent: ParentUser, s: StudentRecord, now: Date): boolean {
+  const p = s.profile;
+  return (
+    !p.archived &&
+    p.isMinor &&
+    ageAt(p.birthDate, now) < 18 &&
+    p.legalGuardian?.email.trim().toLowerCase() === parent.email.trim().toLowerCase()
+  );
 }
 
 /**
@@ -114,19 +118,6 @@ function childView(s: StudentRecord, now: Date): GuardianChild {
 
 // ---------------------------------------------------------------------------
 // Views
-
-function consentsOf(g: GuardianRecord): Consent[] {
-  return CONSENT_KEYS.map((key) => {
-    const decision = g.consents[key];
-    return {
-      key,
-      granted: decision?.granted ?? false,
-      decidedAt: decision?.decidedAt ?? null,
-      decidedBy: decision?.decidedBy ?? null,
-      required: REQUIRED_CONSENTS.includes(key),
-    };
-  });
-}
 
 function publicValidation(v: GuardianRecord["validations"][number]): GuardianValidation {
   // `offer` (the frozen formula) stays on the server.
@@ -202,7 +193,7 @@ export function readChildOverview(parentId: string, childId: string | null, now:
       .map(({ id, label, status }) => ({ id, label, status })),
     documentsTotal: documents.length,
     documentsValidated: documents.filter((d) => d.status === "valide").length,
-    consentsToGive: consentsOf(g).filter((c) => c.decidedAt === null || (c.required && !c.granted)),
+    consentsToGive: guardianConsents(s).filter((c) => c.decidedAt === null || (c.required && !c.granted)),
     pendingValidations: validationsOf(g).filter((v) => v.status === "en_attente"),
     nextInstallment: installmentsOf(s, now).find((i) => i.status !== "payee") ?? null,
   };
@@ -247,8 +238,36 @@ export function readChildDocuments(parentId: string, childId: string | null, now
 export function readChildAuthorisations(parentId: string, childId: string | null, now: Date): ChildAuthorisations | null {
   const found = findChild(parentId, childId, now);
   if (!found) return null;
-  const g = guardianOf(found.s);
-  return { now: now.toISOString(), child: childView(found.s, now), consents: consentsOf(g), validations: validationsOf(g) };
+  return {
+    now: now.toISOString(),
+    child: childView(found.s, now),
+    consents: guardianConsents(found.s),
+    validations: validationsOf(guardianOf(found.s)),
+  };
+}
+
+/**
+ * The legal guardian's decisions as the school's staff sees them in a minor's file (the API layer
+ * checks "eleves.voir"). Null: no such student, or not a minor. `parentAccount`: a parent account
+ * of this school follows the student, so the decisions are made in the parent space.
+ */
+export function readGuardianDecisions(tenantSlug: string, studentId: string, now: Date): GuardianDecisions | null {
+  const t = tenantState(tenantSlug, now);
+  const s = t.students.get(studentId);
+  if (!s || !s.profile.isMinor) return null;
+  const parentAccount = Object.entries(GUARDIANS).some(([parentId, ids]) => {
+    if (!ids.includes(studentId)) return false;
+    const parent = findUserById(parentId);
+    return parent?.role === "parent" && parent.tenantSlug === tenantSlug && isLinked(parent, s, now);
+  });
+  return {
+    now: now.toISOString(),
+    firstName: s.profile.firstName,
+    guardianName: s.profile.legalGuardian?.name ?? null,
+    parentAccount,
+    consents: guardianConsents(s),
+    validations: validationsOf(guardianOf(s)),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -274,7 +293,7 @@ export function writeConsent(
     const verb = granted ? "accordé" : previous?.granted ? "retiré" : "refusé";
     logAudit(t, author, "eleves", `${fullName(s.profile)} : ${CONSENT_AUDIT_LABEL[key]} ${verb} par le représentant légal`, now);
   }
-  return { ok: true, data: { consent: consentsOf(g).find((c) => c.key === key)! } };
+  return { ok: true, data: { consent: guardianConsents(s).find((c) => c.key === key)! } };
 }
 
 /**

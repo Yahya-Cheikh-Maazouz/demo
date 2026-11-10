@@ -49,8 +49,9 @@ export function LeaveForm({ today, defaultDay, agencyPhone }: { today: string; d
   );
 
   useFocusAfterError(formRef, state, undefined, alertRef);
-  // Only the motif is wrong (none chosen): the hook above found the radio group, which cannot take
-  // the focus. Give it to the first motif.
+  // Missing motif: aria-invalid sits on the radio group (ARIA does not allow it on a radio), which
+  // the hook above finds but cannot focus. Give the focus to the first motif, which carries the
+  // error as its description.
   useEffect(() => {
     const form = formRef.current;
     if (state.status !== "error" || !state.fieldErrors?.reason || !form || form.contains(document.activeElement)) return;
@@ -175,7 +176,7 @@ export function LeaveForm({ today, defaultDay, agencyPhone }: { today: string; d
                   checked={checked}
                   onChange={() => edit({ reason })}
                   aria-describedby={errors?.reason ? reasonErrorId : undefined}
-                  className="size-5 accent-[var(--brand)]"
+                  className="size-5 accent-brand"
                 />
                 {reason}
               </label>

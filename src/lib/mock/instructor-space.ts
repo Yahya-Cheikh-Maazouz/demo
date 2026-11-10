@@ -35,6 +35,7 @@ import {
   type StudentRecord,
   type TenantState,
 } from "./store";
+import { guardianConsent } from "./guardian";
 import { readLivretFor, writeLivretUpdate } from "./student-space";
 
 const HOUR_MS = 3_600_000;
@@ -77,14 +78,17 @@ const isConfirmed = (l: Lesson) => l.status === "confirme" || l.status === "atte
 
 /**
  * How the instructor reaches the student. A minor is called directly only when the legal guardian
- * gave the "contact_telephone" consent (parent space); otherwise the student's number is not sent
- * at all and the instructor gets the legal guardian's contact instead.
+ * gave the "contact_telephone" consent (parent space: « Sans cet accord, l'application ne lui donne
+ * pas le numéro … il vous appelle à la place »). Otherwise the student's number is not sent at all
+ * (neither in the HTML nor in the RSC payload) and the instructor gets the legal guardian's contact
+ * instead, or nothing ("passez par l'accueil") when no guardian is on file.
  */
 function contactOf(record: StudentRecord | undefined): Pick<InstructorStudent, "isMinor" | "phone" | "guardianContact"> {
   if (!record) return { isMinor: false, phone: null, guardianContact: null };
   const { profile } = record;
   if (!profile.isMinor) return { isMinor: false, phone: profile.phone || null, guardianContact: null };
-  if (record.guardian?.consents.contact_telephone?.granted === true) {
+  // Only an authorisation that was given applies: refused, withdrawn or never decided → no number.
+  if (guardianConsent(record, "contact_telephone") === true) {
     return { isMinor: true, phone: profile.phone || null, guardianContact: null };
   }
   const guardian = profile.legalGuardian;
@@ -506,10 +510,6 @@ function conflictOf(t: TenantState, lesson: Lesson): LeaveConflict {
   };
 }
 
-/**
- * Declares a leave. Codes: "invalide" (fieldErrors start, end, reason), "chevauchement" (another
- * leave on the period), "conflit" (active lessons on the period, listed in `conflicts`).
- */
 /** Milliseconds of an ISO instant in UTC ("2026-11-12T07:00:00.000Z") naming a real calendar day, else NaN. */
 function isoInstant(value: string): number {
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?Z$/.test(value)) return Number.NaN;
@@ -518,6 +518,10 @@ function isoInstant(value: string): number {
   return !Number.isNaN(ms) && new Date(ms).toISOString().slice(0, 10) === value.slice(0, 10) ? ms : Number.NaN;
 }
 
+/**
+ * Declares a leave. Codes: "invalide" (fieldErrors start, end, reason), "chevauchement" (another
+ * leave on the period), "conflit" (active lessons on the period, listed in `conflicts`).
+ */
 export function writeLeave(tenantSlug: string, instructorId: string, input: LeaveInput, now: Date): LeaveResult {
   const t = instructorState(tenantSlug, instructorId, now);
   const fieldErrors: Record<string, string> = {};

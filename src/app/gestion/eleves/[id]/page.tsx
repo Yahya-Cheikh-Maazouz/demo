@@ -11,6 +11,7 @@ import { LoadingLabel, Skeleton } from "@/components/ui/skeleton";
 import { DocumentReview } from "@/features/eleves/document-review";
 import { GeneralInfo } from "@/features/eleves/general-info";
 import { StudentLessons, StudentPayments, StudentStats } from "@/features/eleves/student-activity";
+import { GuardianDecisionsCard, GuardianDecisionsSkeleton } from "@/features/parent/guardian-decisions";
 import { BalanceSummary } from "@/features/solde/balance-summary";
 import { getStaffUser, getStudentFile } from "@/lib/api/gestion";
 import { formatDate } from "@/lib/format";
@@ -55,6 +56,13 @@ async function StudentFileContent({ params }: { params: PageProps<"/gestion/elev
       <div className="grid gap-6 xl:grid-cols-3">
         <div className="min-w-0 space-y-6 xl:col-span-2">
           <StudentStats stats={file.stats} now={file.now} />
+
+          {/* Minor: the legal guardian's authorisations, given in the parent space. */}
+          {profile.isMinor && (
+            <Suspense fallback={<GuardianDecisionsSkeleton />}>
+              <GuardianDecisionsCard studentId={profile.id} />
+            </Suspense>
+          )}
 
           <Card>
             <CardHeader

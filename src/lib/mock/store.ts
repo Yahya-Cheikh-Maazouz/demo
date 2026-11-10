@@ -803,10 +803,11 @@ function seedTenant(slug: string, now: Date): TenantState {
       status: "a_valider",
     });
   }
-  // Some upcoming lessons are still requests waiting for the instructor.
+  // Some upcoming lessons are still requests waiting for the instructor (a child followed by a
+  // parent account already has exactly one: guardian.ts).
   for (const l of t.lessons) {
     const student = fixtures.find((f) => f.id === l.studentId);
-    if (student && !student.scripted && l.status === "confirme" && Date.parse(l.start) > now.getTime() && hash(Date.parse(l.start), l.studentId.length) % 6 === 0) {
+    if (student && !student.scripted && !t.students.get(student.id)?.guardian && l.status === "confirme" && Date.parse(l.start) > now.getTime() && hash(Date.parse(l.start), l.studentId.length) % 6 === 0) {
       l.status = "a_confirmer";
     }
   }

@@ -26,15 +26,22 @@ export function callTarget(student: InstructorStudent): { phone: string; guardia
   return null;
 }
 
-/** "Contact par le représentant légal : Nathalie Fontaine", under the name of such a minor. */
+/**
+ * Under the name of a minor whose legal guardian did not allow direct phone contact: "Contact via
+ * le représentant légal : Nathalie Fontaine", or "Passez par l'accueil" when no guardian is on file.
+ */
 export function GuardianContactNote({ student, className }: { student: InstructorStudent; className?: string }) {
-  if (!student.guardianContact) return null;
+  if (!student.isMinor || student.phone) return null;
   return (
     <p className={cn("flex items-start gap-1.5 text-sm text-ink-muted", className)}>
       <ShieldUser className="mt-0.5 size-4 shrink-0 text-brand" aria-hidden />
-      <span>
-        Contact par le représentant légal : <span className="font-semibold text-ink">{student.guardianContact.name}</span>
-      </span>
+      {student.guardianContact ? (
+        <span>
+          Contact via le représentant légal : <span className="font-semibold text-ink">{student.guardianContact.name}</span>
+        </span>
+      ) : (
+        <span>Pas de contact direct : passez par l&apos;accueil.</span>
+      )}
     </p>
   );
 }
@@ -127,7 +134,7 @@ export function InstructorLessonCard({ lesson, now }: { lesson: InstructorLesson
           </Link>
         ) : (
           <>
-            {call ? (
+            {call && (
               <a
                 href={telHref(call.phone)}
                 className={buttonStyles({
@@ -141,15 +148,14 @@ export function InstructorLessonCard({ lesson, now }: { lesson: InstructorLesson
                 {viaGuardian ? "Appeler le représentant légal" : "Appeler"}
                 <span className="sr-only">{viaGuardian ? `, ${call.guardianName}, pour ${name}` : ` ${name}`}</span>
               </a>
-            ) : (
-              <span />
             )}
             <Link
               href={href}
               className={buttonStyles({
                 variant: toSign ? "primary" : "secondary",
                 size: "lg",
-                className: cn(bigButton, viaGuardian && "col-span-2"),
+                // Alone on its row when the guardian's button takes the whole row, or without any number.
+                className: cn(bigButton, (viaGuardian || !call) && "col-span-2"),
               })}
             >
               {toSign ? <PenLine className="size-5" aria-hidden /> : null}

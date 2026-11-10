@@ -15,35 +15,48 @@ import type { Consent, ConsentKey, GuardianValidationStatus } from "@/lib/types"
 type ConsentMeta = {
   label: string;
   icon: LucideIcon;
-  /** What the parent allows, for this child. */
+  /**
+   * What the parent allows for this child and, when the app applies it, what changes without it.
+   * Only what the app really does: no promise it does not keep.
+   */
   description: (firstName: string) => string;
+  /** For the school's staff, while the authorisation is not given: what the team must respect. */
+  withoutIt: (firstName: string) => string;
 };
 
-/** The authorisations a legal guardian gives for a minor (CLAUDE.md, "Sécurité et RGPD"). */
+/**
+ * The authorisations a legal guardian gives for a minor (CLAUDE.md, "Sécurité et RGPD"). Where each
+ * one applies: src/lib/mock/guardian.ts (RGPD → no new lesson; phone → the instructor gets the
+ * guardian's number; photos and communications → shown in the student's file to the staff).
+ */
 export const CONSENT_META: Record<ConsentKey, ConsentMeta> = {
   photos: {
     label: "Photos et vidéos pendant les leçons",
     icon: Camera,
     description: (name) =>
-      `Le moniteur peut photographier ou filmer une manœuvre pour l'expliquer à ${name} dans son livret. Les images ne sont jamais publiées.`,
+      `Le moniteur peut prendre ${name} en photo ou en vidéo pendant une leçon, par exemple pour revoir une manœuvre avec ${name}.`,
+    withoutIt: (name) => `Pas de photo ni de vidéo de ${name} pendant les leçons.`,
   },
   contact_telephone: {
     label: "Contact téléphonique direct par le moniteur",
     icon: Phone,
     description: (name) =>
-      `Le moniteur peut appeler ou écrire directement à ${name} (retard, point de rendez-vous). Sans cet accord, le numéro de ${name} ne lui est pas communiqué : il passe par vous.`,
+      `Le moniteur peut appeler ${name} directement (retard, point de rendez-vous). Sans cet accord, l'application ne lui donne pas le numéro de ${name} : il vous appelle à la place.`,
+    withoutIt: (name) => `Les moniteurs n'ont pas le numéro de ${name} : ils appellent le représentant légal.`,
   },
   rgpd: {
     label: "Traitement des données personnelles (RGPD)",
     icon: ShieldCheck,
     description: (name) =>
-      `Nécessaire à la formation de ${name} : dossier ANTS, planning, livret et factures. Les données sont conservées pendant la formation, puis archivées comme la loi l'exige.`,
+      `Couvre le dossier ANTS, le planning, le livret et les factures de ${name}. Sans ce consentement, aucune nouvelle leçon ne peut être planifiée pour ${name}.`,
+    withoutIt: (name) => `Aucune nouvelle leçon ne peut être planifiée pour ${name}.`,
   },
   communications: {
     label: "Communications par e-mail et SMS",
     icon: Mail,
     description: (name) =>
-      `Rappels de leçons, suivi du dossier et informations de l'auto-école, envoyés à vous et à ${name}.`,
+      `Rappels de leçons, suivi du dossier et informations de l'auto-école, par e-mail et SMS, pour vous et pour ${name}.`,
+    withoutIt: (name) => `Pas de rappels ni d'informations par e-mail ou SMS à ${name} et à son représentant légal.`,
   },
 };
 

@@ -45,7 +45,7 @@ function RequestCard({ lesson, now }: { lesson: InstructorLesson; now: string })
           </a>
         )}
       </div>
-      {call?.guardianName && (
+      {call?.guardianName ? (
         <div className="mt-1 flex flex-wrap items-center justify-between gap-x-3">
           <GuardianContactNote student={lesson.student} />
           <a href={telHref(call.phone)} className={buttonStyles({ variant: "ghost", className: "-ml-3 h-12 rounded-2xl text-brand" })}>
@@ -54,6 +54,9 @@ function RequestCard({ lesson, now }: { lesson: InstructorLesson; now: string })
             <span className="sr-only">, {call.guardianName}, pour {name}</span>
           </a>
         </div>
+      ) : (
+        // A minor without direct contact nor a guardian on file: "Passez par l'accueil".
+        <GuardianContactNote student={lesson.student} className="mt-1" />
       )}
       <RequestReview
         className="mt-4"

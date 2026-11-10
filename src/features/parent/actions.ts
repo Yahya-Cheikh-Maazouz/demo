@@ -84,8 +84,8 @@ export async function decideValidationAction(prev: ValidationFormState, formData
     status: "success",
     message:
       decision === "accepte"
-        ? "Votre accord a été envoyé à l'auto-école."
-        : "Votre refus a été envoyé à l'auto-école. Elle vous recontactera si besoin.",
+        ? "Votre accord est enregistré et appliqué au dossier."
+        : "Votre refus est enregistré : l'auto-école le voit dans le dossier.",
     attempt,
   };
 }

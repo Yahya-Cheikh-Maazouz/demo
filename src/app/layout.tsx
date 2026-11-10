@@ -1,13 +1,14 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo } from "next/font/google";
+import { Bricolage_Grotesque } from "next/font/google";
 import { Suspense } from "react";
 import { TenantTheme } from "@/components/tenant-theme";
 import "./globals.css";
 
-// Typeface of the client's reference prototype (meeting of 1 Nov 2026).
-const archivo = Archivo({
-  variable: "--font-archivo",
+// Variable font (weights 200–800). The optical size axis gives large titles their display cut.
+const bricolage = Bricolage_Grotesque({
+  variable: "--font-bricolage",
   subsets: ["latin"],
+  axes: ["opsz"],
   display: "swap",
 });
 
@@ -25,7 +26,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="fr" className={`${archivo.variable} h-full antialiased`}>
+    <html lang="fr" className={`${bricolage.variable} h-full antialiased`}>
       <body className="min-h-dvh">
         <Suspense fallback={null}>
           <TenantTheme />

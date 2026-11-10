@@ -108,7 +108,7 @@ function NavGroups({
           <p
             className={cn(
               "px-3 pb-2 text-[10px] font-bold tracking-[0.16em] uppercase",
-              dark ? "text-white/45" : "text-ink-subtle",
+              dark ? "text-white/60" : "text-ink-subtle",
             )}
           >
             {group.label}

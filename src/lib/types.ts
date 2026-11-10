@@ -937,3 +937,19 @@ export type SubscriptionOverview = {
   graceEndsAt: string | null;
   quotas: Quota[];
 };
+
+// ---------------------------------------------------------------------------
+// Parent space: the legal guardian's decisions, as the school's staff sees them
+
+/** Authorisations and answers of the legal guardian, shown in a minor's file (gestion). */
+export type GuardianDecisions = {
+  now: string;
+  firstName: string;
+  /** Legal guardian recorded in the school's file, if any. */
+  guardianName: string | null;
+  /** A parent account follows the student: the decisions are made in the parent space. */
+  parentAccount: boolean;
+  consents: Consent[];
+  /** Proposals of the school (e.g. a change of formula): pending first, then the latest decided. */
+  validations: GuardianValidation[];
+};

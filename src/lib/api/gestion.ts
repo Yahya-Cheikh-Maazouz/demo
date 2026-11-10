@@ -9,6 +9,7 @@
 import { redirect } from "next/navigation";
 import { connection } from "next/server";
 import * as imports from "@/lib/mock/imports";
+import * as parentSpace from "@/lib/mock/parent-space";
 import * as platform from "@/lib/mock/platform";
 import * as settings from "@/lib/mock/settings";
 import * as store from "@/lib/mock/store";
@@ -21,6 +22,7 @@ import type {
   AuditEntry,
   CashEntry,
   CashMethod,
+  GuardianDecisions,
   HourPack,
   HourPackInput,
   ImportField,
@@ -117,6 +119,15 @@ export async function getStudentRows(): Promise<StudentRow[]> {
 export async function getStudentFile(studentId: string): Promise<StudentFile | null> {
   const { tenant, now } = await readContext("eleves.voir");
   return store.readStudentFile(tenant, studentId, now);
+}
+
+/**
+ * Authorisations given by the legal guardian of a minor (parent space) and the answers to the
+ * school's proposals, for the student's file. Null when the student is not a minor of this school.
+ */
+export async function getStudentGuardianDecisions(studentId: string): Promise<GuardianDecisions | null> {
+  const { tenant, now } = await readContext("eleves.voir");
+  return parentSpace.readGuardianDecisions(tenant, studentId, now);
 }
 
 /** Active students for the pickers of the planning and the cash register. */
